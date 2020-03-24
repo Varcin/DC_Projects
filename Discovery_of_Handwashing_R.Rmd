@@ -1,6 +1,6 @@
 ---
-
-
+title: "Discovery of Handwashing"
+date: "March 23, 2020"
 output: html_document
 ---
 
@@ -9,8 +9,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-
-# Discovery of Handwashing
 
 ```{r echo=FALSE, out.width = '40%', out.extra='style="float:left; padding:10px"'}
 knitr::include_graphics("statics/ignaz_semmelweis_1860.jpeg")
@@ -27,5 +25,138 @@ This is Dr. Ignaz Semmelweis, a Hungarian physician born in 1818 and active at t
 
 In this notebook, we're going to reanalyze the data that made Semmelweis discover the importance of handwashing. Let's start by looking at the data that made Semmelweis realize that something was wrong with the procedures at Vienna General Hospital.
 
+```{r Load Data, echo=FALSE, include=FALSE, message=FALSE}
+# Load in the tidyverse package
+library(tidyverse)
+
+# Read datasets/yearly_deaths_by_clinic.csv into yearly
+yearly <- read_csv("data/yearly_deaths_by_clinic.csv")
+
+```
 
 
+## The alarming number of deaths
+The table above shows the number of women giving birth at the two clinics at the Vienna General Hospital for the years 1841 to 1846. You'll notice that giving birth was very dangerous; an alarming number of women died as the result of childbirth, most of them from childbed fever.
+
+We see this more clearly if we look at the proportion of deaths out of the number of women giving birth.
+
+
+```{r Death Proportion, echo=F, include=F}
+
+# Adding a new column to yearly with proportion of deaths per no. births
+yearly <- yearly %>%
+    mutate(proportion_deaths = deaths/births)
+
+```
+
+## Death at the clinics
+If we now plot the proportion of deaths at both clinic 1 and clinic 2 we'll see a curious pattern...
+
+
+```{r Plot Proportion of Deaths, echo=F, include=F}
+
+# Setting the size of plots in this notebook
+options(repr.plot.width=7, repr.plot.height=4)
+
+# Plot yearly proportion of deaths at the two clinics
+ggplot(yearly, aes(x=year, y=proportion_deaths, color = clinic, group=clinic)) +
+geom_line()
+
+```
+
+
+## The handwashing begins
+Why is the proportion of deaths constantly so much higher in Clinic 1? Semmelweis saw the same pattern and was puzzled and distressed. The only difference between the clinics was that many medical students served at Clinic 1, while mostly midwife students served at Clinic 2. While the midwives only tended to the women giving birth, the medical students also spent time in the autopsy rooms examining corpses.
+
+Semmelweis started to suspect that something on the corpses, spread from the hands of the medical students, caused childbed fever. So in a desperate attempt to stop the high mortality rates, he decreed: Wash your hands! This was an unorthodox and controversial request, nobody in Vienna knew about bacteria at this point in time.
+
+Let's load in monthly data from Clinic 1 to see if the handwashing had any effect.
+
+
+```{r Deaths by Month, echo=F, include=F}
+
+# Read datasets/monthly_deaths.csv into monthly
+monthly <- read_csv("data/monthly_deaths.csv")
+
+# Adding a new column with proportion of deaths per no. births
+monthly <- monthly %>%
+    mutate(proportion_deaths = deaths/births)
+
+# Print out the first rows in monthly
+head(monthly, 1)
+
+```
+
+## The effect of handwashing
+With the data loaded we can now look at the proportion of deaths over time. In the plot below we haven't marked where obligatory handwashing started, but it reduced the proportion of deaths to such a degree that you should be able to spot it!
+
+
+```{r Plot Deaths, echo=F}
+# Plot monthly proportion of deaths
+ggplot(monthly, aes(x=date, y=proportion_deaths)) +
+geom_line() +
+theme_bw()
+
+```
+
+
+## The effect of handwashing highlighted
+Starting from the summer of 1847 the proportion of deaths is drastically reduced and, yes, this was when Semmelweis made handwashing obligatory.
+
+The effect of handwashing is made even more clear if we highlight this in the graph.
+
+
+```{r echo=F}
+
+# From this date handwashing was made mandatory
+handwashing_start = as.Date('1847-06-01')
+
+# Add a TRUE/FALSE column to monthly called handwashing_started
+monthly <- monthly %>%
+    mutate(handwashing_started = date >= handwashing_start)
+
+# Plot monthly proportion of deaths before and after handwashing
+ggplot(monthly, aes(x=date, y=proportion_deaths, color = handwashing_started)) +
+geom_line() +
+xlab("Date") +
+ylab("Proportion of Deaths to Births") +
+theme_bw()
+
+```
+
+
+
+## More handwashing, fewer deaths?
+Again, the graph shows that handwashing had a huge effect. How much did it reduce the monthly proportion of deaths on average?
+
+```{r Monthly Summary, echo=F, include=F}
+# Calculating the mean proportion of deaths 
+# before and after handwashing.
+
+monthly_summary <- monthly %>%
+    group_by(handwashing_started) %>%
+    summarise(mean_proportion_deaths = mean(proportion_deaths))
+
+# Printing out the summary.
+monthly_summary
+
+```
+
+
+## A statistical analysis of Semmelweis handwashing data
+It reduced the proportion of deaths by around 8 percentage points! From 10% on average before handwashing to just 2% when handwashing was enforced (which is still a high number by modern standards). To get a feeling for the uncertainty around how much handwashing reduces mortalities we could look at a confidence interval (here calculated using a t-test).
+
+```{r t-test, echo=F}
+# Calculating a 95% Confidence intrerval using t.test 
+test_result <- t.test( proportion_deaths ~ handwashing_started, data = monthly)
+test_result
+
+```
+
+
+## The fate of Dr. Semmelweis
+That the doctors didn't wash their hands increased the proportion of deaths by between 6.7 and 10 percentage points, according to a 95% confidence interval. All in all, it would seem that Semmelweis had solid evidence that handwashing was a simple but highly effective procedure that could save many lives.
+
+The tragedy is that, despite the evidence, Semmelweis' theory - that childbed fever was caused by some "substance" (what we today know as bacteria) from autopsy room corpses - was ridiculed by contemporary scientists. The medical community largely rejected his discovery and in 1849 he was forced to leave the Vienna General Hospital for good.
+
+One reason for this was that statistics and statistical arguments were uncommon in medical science in the 1800s. Semmelweis only published his data as long tables of raw data, but he didn't show any graphs nor confidence intervals. If he would have had access to the analysis we've just put together he might have been more successful in getting the Viennese doctors to wash their hands.
