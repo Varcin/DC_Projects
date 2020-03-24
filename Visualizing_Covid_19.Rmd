@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## From Epidemic to Pandemic
 
 ```{r echo=FALSE, out.width = '40%', out.extra='style="float:left; padding:10px"'}
-knitr::include_graphics("temp.jpg")
+knitr::include_graphics("statics/covid19.jpg")
 ```
 
 In December 2019, COVID-19 coronavirus was first identified in the Wuhan region of China. By March 11, 2020, the World Health Organization (WHO) categorized the COVID-19 outbreak as a pandemic. A lot has happened in the months in between with major outbreaks in Iran, South Korea, and Italy.
