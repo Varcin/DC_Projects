@@ -1,0 +1,257 @@
+---
+title: "Covid-19"
+author: "Bilsay Varcin"
+date: "March 21, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## From Epidemic to Pandemic
+
+```{r echo=FALSE, out.width = '40%', out.extra='style="float:left; padding:10px"'}
+knitr::include_graphics("temp.jpg")
+```
+
+In December 2019, COVID-19 coronavirus was first identified in the Wuhan region of China. By March 11, 2020, the World Health Organization (WHO) categorized the COVID-19 outbreak as a pandemic. A lot has happened in the months in between with major outbreaks in Iran, South Korea, and Italy.
+
+We know that COVID-19 spreads through respiratory droplets, such as through coughing, sneezing, or speaking. But, how quickly did the virus spread across the globe? And, can we see any effect from country-wide policies, like shutdowns and quarantines?
+
+Fortunately, organizations around the world have been collecting data so that governments can monitor and learn from this pandemic. Notably, the Johns Hopkins University Center for Systems Science and Engineering created a [publically available data repository](https://github.com/RamiKrispin/coronavirus) to consolidate this data from sources like the WHO, the Centers for Disease Control and Prevention (CDC), and the Ministry of Health from multiple countries. 
+
+
+In this notebook, you will visualize COVID-19 data from the first several weeks of the outbreak to see at what point this virus became a global pandemic.
+
+Information and data regarding COVID-19 is frequently being updated. The data used in this project is pulled from [here](https://github.com/RamiKrispin/coronavirus-csv) which is updated regularly. 
+
+
+
+
+
+```{r Load Packages, echo = FALSE, include = FALSE, message=FALSE}
+library(readr) 
+library(ggplot2)
+library(dplyr)
+library(httr)
+
+```
+
+
+```{r Read Data, echo = FALSE, include = FALSE, message=FALSE}
+
+confirmed_cases_worldwide_raw <- read_csv(url("https://raw.githubusercontent.com/RamiKrispin/coronavirus-csv/master/coronavirus_dataset.csv"))
+
+```
+
+
+
+```{r Cases by day, echo = FALSE, include = FALSE, message=FALSE}
+
+confirmed_cases_worldwide_raw <- confirmed_cases_worldwide_raw %>%
+  filter(type == "confirmed")
+
+confirmed_cases_worldwide <- confirmed_cases_worldwide_raw %>%
+  group_by(date) %>% summarise(cum_cases = sum(cases, na.rm = T)) %>%
+  mutate(cum_cases = cumsum(cum_cases))
+
+cases_by_day <- ggplot(confirmed_cases_worldwide, aes(date, cum_cases)) +
+  geom_line() +
+  ylab("Cumulative confirmed cases") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+
+```
+
+### Confirmed cases throughout the world
+
+```{r echo=FALSE, out.width = '80%'}
+plot(cases_by_day)
+```
+
+
+### China compared to the rest of the world
+
+There is an odd jump in mid February, then the rate of new cases slows down for a while, then speeds up again in March. We need to dig deeper to see what is happening.
+
+Early on in the outbreak, the COVID-19 cases were primarily centered in China. Let's plot confirmed COVID-19 cases in China and the rest of the world separately to see if it gives us any insight.
+
+We'll build on this plot in future tasks. One thing that will be important for the following tasks is that you add aesthetics within the line geometry of your ggplot, rather than making them global aesthetics.
+
+```{r china vs world, echo = FALSE, include=FALSE}
+
+confirmed_cases_china_vs_world <- confirmed_cases_worldwide_raw %>%
+  mutate(is_china = ifelse(Country.Region == "China", "China", "Rest of The World")) %>%
+  group_by(is_china, date) %>%
+  summarise(cum_cases = sum(cases, na.rm = T)) %>% ungroup() %>%
+  arrange(is_china, date) %>%
+  group_by(is_china) %>% 
+  mutate(cum_cases = cumsum(cum_cases)) %>% ungroup()
+
+# Draw a line plot of cumulative cases vs. date, grouped and colored by is_china
+# Define aesthetics within the line geom
+plt_cum_confirmed_cases_china_vs_world <- ggplot(confirmed_cases_china_vs_world) +
+  geom_line(aes(x = date, y = cum_cases, color = is_china, group = is_china)) +
+  ylab("Cumulative confirmed cases") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+
+```
+
+```{r echo=FALSE, out.width = '80%'}
+plot(plt_cum_confirmed_cases_china_vs_world)
+```
+
+
+The two lines have very different shapes. In February, the majority of cases were in China. That changed in March when it really became a global outbreak: around March 14, the total number of cases outside China overtook the cases inside China. This was days after the WHO declared a pandemic.
+
+There were a couple of other landmark events that happened during the outbreak. For example, the huge jump in the China line on February 13, 2020 wasn't just a bad day regarding the outbreak; China changed the way it reported figures on that day (CT scans were accepted as evidence for COVID-19, rather than only lab tests).
+
+By annotating events like this, we can better interpret changes in the plot.
+
+
+```{r echo=FALSE, include = FALSE}
+
+who_events <- tribble(
+  ~ date, ~ event,
+  "2020-01-30", "Global health\nemergency declared",
+  "2020-03-11", "Pandemic\ndeclared",
+  "2020-02-13", "China reporting\nchange"
+) %>%
+  mutate(date = as.Date(date))
+
+# Using who_events, add vertical dashed lines with an xintercept at date
+# and text at date, labeled by event, and at 100000 on the y-axis
+who_event_plot <- plt_cum_confirmed_cases_china_vs_world +
+  geom_vline(data = who_events, aes(xintercept = date), linetype = "dashed") +
+  geom_text(data = who_events, aes(x = date, label = event), y = 100000)
+  
+
+```
+
+
+```{r echo=FALSE, out.width = '80%'}
+plot(who_event_plot)
+```
+
+
+When trying to assess how big future problems are going to be, we need a measure of how fast the number of cases is growing. A good starting point is to see if the cases are growing faster or slower than linearly.
+
+There is a clear surge of cases around February 13, 2020, with the reporting change in China. However, a couple of days after, the growth of cases in China slows down. How can we describe COVID-19's growth in China after February 15, 2020?
+
+
+
+```{r China Trend Line, echo=FALSE, include=FALSE}
+
+# Filter for China, from Feb 15
+china_after_feb15 <- confirmed_cases_china_vs_world %>%
+  filter(date >= "2020-02-15" & is_china == "China")
+
+# Using china_after_feb15, draw a line plot cum_cases vs. date
+# Add a smooth trend line using linear regression, no error bars
+china_trend <- ggplot(china_after_feb15, aes(x = date, y = cum_cases)) +
+  geom_line() +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE) +
+  ylab("Cumulative confirmed cases") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+
+```
+
+
+
+```{r echo=FALSE, out.width = '80%'}
+plot(china_trend)
+```
+
+
+From the plot above, the growth rate in China is slower than linear. That's great news because it indicates China has at least somewhat contained the virus in late February and early March.
+
+How does the rest of the world compare to linear growth?
+
+
+```{r World trend line, echo=FALSE,include=FALSE}
+# Filter confirmed_cases_china_vs_world for not China
+not_china <- confirmed_cases_china_vs_world %>%
+    filter(is_china != "China")
+
+# Using not_china, draw a line plot cum_cases vs. date
+# Add a smooth trend line using linear regression, no error bars
+plt_not_china_trend_lin <- ggplot(not_china, aes(x = date, y = cum_cases)) +
+  geom_line() +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE) +
+  ylab("Cumulative confirmed cases") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+
+```
+
+
+```{r echo=FALSE, out.width = '80%'}
+plot(plt_not_china_trend_lin)
+```
+
+
+From the plot above, we can see a straight line does not fit well at all, and the rest of the world is growing much faster than linearly. What if we added a logarithmic scale to the y-axis?
+
+```{r Logarithmic Scale, echo=F, include=F}
+
+# Modify the plot to use a logarithmic scale on the y-axis
+not_china_log <- plt_not_china_trend_lin + 
+    scale_y_log10(labels = scales::comma)
+
+```
+
+
+```{r echo=FALSE, out.width = '80%'}
+plot(not_china_log)
+```
+
+
+### Which countries outside of China have been hit hardest?
+
+With the logarithmic scale, we get a much closer fit to the data. From a data science point of view, a good fit is great news. Unfortunately, from a public health point of view, that means that cases of COVID-19 in the rest of the world are growing at an exponential rate, which is terrible news.
+
+Not all countries are being affected by COVID-19 equally, and it would be helpful to know where in the world the problems are greatest. Let's find the countries outside of China with the most confirmed cases in our dataset.
+
+
+```{r top 7 countries, echo = F, include=F}
+
+# Run this to get the data for each country
+
+# Group by country, summarize to calculate total cases, find the top 7
+
+top_7_countries <- confirmed_cases_worldwide_raw %>%
+  filter(Country.Region != "China") %>%
+  group_by(Country.Region) %>%
+  summarise(total_cases = sum(cases, na.rm = T)) %>%
+  top_n(7)
+
+top_countries_by_total_cases <- confirmed_cases_worldwide_raw %>%
+  filter(date > "2020-02-17") %>%
+  group_by(Country.Region, date) %>%
+  summarise(cum_cases = sum(cases, na.rm = T)) %>% ungroup() %>%
+  arrange(Country.Region, date) %>%
+  group_by(Country.Region) %>% 
+  mutate(cum_cases = cumsum(cum_cases)) %>%
+  filter(Country.Region %in% top_7_countries$Country.Region)
+
+# Using confirmed_cases_top7_outside_china, draw a line plot of
+# cum_cases vs. date, grouped and colored by country
+top7_line <- ggplot(top_countries_by_total_cases, aes(x=date, y=cum_cases, color=Country.Region, group=Country.Region)) +
+geom_line() +
+ylab("Cumulative confirmed cases")  +
+scale_y_continuous(labels = scales::comma) +
+theme_bw()
+
+```
+
+Even though the outbreak was first identified in China, there is only one country from East Asia (South Korea) in the above table. Four of the listed countries (France, Germany, Italy, and Spain) are in Europe and share borders. To get more context, we can plot these countries' confirmed cases over time.
+
+
+
+```{r echo=FALSE, out.width = '80%'}
+plot(top7_line)
+```
+
