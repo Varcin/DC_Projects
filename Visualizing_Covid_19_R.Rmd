@@ -275,7 +275,7 @@ plot(top7_line)
 
 
 
-### Is Republic of Turkey turning to Italy
+### Is Republic of Turkey becoming Italy
 
 Republic of Turkey had been lucky until March 10 where the first case of COVID-19 confirmed. Within a matter of two weeks, total cases climbed up to more than 1,800. Italy had the highest growth ratio of positive cases until United States, specifically the State of New York, increased number of COVID-19 tests conducted daily. Italy and Turkey are both Mediterranean countries and have been showing similar behavior against actions taken to slow down the spread of the pandemic. The spread in Italy started early but started slow until total confirmed cases reached to 20. To make the Italy and Turkey comparison more meaningful I will start the comparison after the day total cases in Italy reached 20.
 
