@@ -313,4 +313,4 @@ plot(turkeyTrajectory)
 ```
 
 
-Turkey has definitely not make a good start and not on a good trajectory. 
+Turkey has definitely not made a good start and not on a good trajectory. 
