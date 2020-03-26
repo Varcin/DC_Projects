@@ -58,9 +58,12 @@ confirmed_cases_worldwide <- confirmed_cases_worldwide_raw %>%
 
 cases_by_day <- ggplot(confirmed_cases_worldwide, aes(date, cum_cases)) +
   geom_line() +
-  ylab("Cumulative confirmed cases") +
+  ylab("Cumulative Confirmed Cases") +
+  xlab("Date") +
   scale_y_continuous(labels = scales::comma) +
-  theme_bw()
+  theme_bw() +   
+  theme(legend.position="bottom") +   
+  theme(legend.title=element_blank())
 
 ```
 
@@ -93,9 +96,12 @@ confirmed_cases_china_vs_world <- confirmed_cases_worldwide_raw %>%
 # Define aesthetics within the line geom
 plt_cum_confirmed_cases_china_vs_world <- ggplot(confirmed_cases_china_vs_world) +
   geom_line(aes(x = date, y = cum_cases, color = is_china, group = is_china)) +
-  ylab("Cumulative confirmed cases") +
+  ylab("Cumulative Confirmed Cases") +
+  xlab("Date") +
   scale_y_continuous(labels = scales::comma) +
-  theme_bw()
+  theme_bw() +   
+  theme(legend.position="bottom") +   
+  theme(legend.title=element_blank())
 
 ```
 
@@ -153,9 +159,12 @@ china_after_feb15 <- confirmed_cases_china_vs_world %>%
 china_trend <- ggplot(china_after_feb15, aes(x = date, y = cum_cases)) +
   geom_line() +
   geom_smooth(formula = y~x, method = "lm", se = FALSE) +
-  ylab("Cumulative confirmed cases") +
+  ylab("Cumulative Confirmed Cases") +
+  xlab("Date") +
   scale_y_continuous(labels = scales::comma) +
-  theme_bw()
+  theme_bw() +   
+  theme(legend.position="bottom") +   
+  theme(legend.title=element_blank())
 
 ```
 
@@ -181,9 +190,12 @@ not_china <- confirmed_cases_china_vs_world %>%
 plt_not_china_trend_lin <- ggplot(not_china, aes(x = date, y = cum_cases)) +
   geom_line() +
   geom_smooth(formula = y~x, method = "lm", se = FALSE) +
-  ylab("Cumulative confirmed cases") +
+  ylab("Cumulative Confirmed Cases") +
+  xlab("Date") +
   scale_y_continuous(labels = scales::comma) +
-  theme_bw()
+  theme_bw() +   
+  theme(legend.position="bottom") +   
+  theme(legend.title=element_blank())
 
 ```
 
@@ -240,14 +252,20 @@ top_countries_by_total_cases <- confirmed_cases_worldwide_raw %>%
 # Using confirmed_cases_top7_outside_china, draw a line plot of
 # cum_cases vs. date, grouped and colored by country
 top7_line <- ggplot(top_countries_by_total_cases, aes(x=date, y=cum_cases, color=Country.Region, group=Country.Region)) +
-geom_line() +
-ylab("Cumulative confirmed cases")  +
-scale_y_continuous(labels = scales::comma) +
-theme_bw()
+  geom_line() +
+  ylab("Cumulative Confirmed Cases")  +
+  xlab("Date") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw() +
+  theme(legend.position="bottom") +
+  theme(legend.title=element_blank()) +
+  guides(colour = guide_legend(nrow = 1))
+
+
 
 ```
 
-Even though the outbreak was first identified in China, there is only one country from East Asia (South Korea) in the above table. Four of the listed countries (France, Germany, Italy, and Spain) are in Europe and share borders. To get more context, we can plot these countries' confirmed cases over time.
+Even though the outbreak was first identified in China, there is no other country from East Asia in the below table. Four of the listed countries (France, Germany, Italy, Spain and Switzerland) are in Europe and share borders. To get more context, we can plot these countries' confirmed cases over time. 
 
 
 
@@ -255,3 +273,44 @@ Even though the outbreak was first identified in China, there is only one countr
 plot(top7_line)
 ```
 
+
+
+### Is Republic of Turkey turning to Italy
+
+Republic of Turkey had been lucky until March 10 where the first case of COVID-19 confirmed. Within a matter of two weeks, total cases climbed up to more than 1,800. Italy had the highest growth ratio of positive cases until United States, specifically the State of New York, increased number of COVID-19 tests conducted daily. Italy and Turkey are both Mediterranean countries and have been showing similar behavior against actions taken to slow down the spread of the pandemic. The spread in Italy started early but started slow until total confirmed cases reached to 20. To make the Italy and Turkey comparison more meaningful I will start the comparison after the day total cases in Italy reached 20.
+
+
+```{r Italy vs Turkey, echo = F}
+
+italyTurkey <- confirmed_cases_worldwide_raw %>%
+  filter(Country.Region %in% c("Italy", "Turkey")) %>%
+  group_by(Country.Region) %>%
+  mutate(cum_sum = cumsum(cases)) %>%
+  ungroup() %>%
+  filter(cum_sum >= 18) %>%
+  group_by(Country.Region) %>%
+  mutate(DaysPassed = row_number()) %>% ungroup() %>%
+  select(Country.Region, cum_sum, DaysPassed)
+  
+
+turkeyTrajectory <- ggplot(italyTurkey, aes(x=DaysPassed, y=cum_sum, color=Country.Region, group=Country.Region)) +
+  geom_line() +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(1, max(italyTurkey$DaysPassed), by = 2)) +
+  xlab("Days Since Cumulative Cases Passed 20") +
+  ylab("Number of Total Cases") + 
+  theme_bw() +
+  theme(legend.position="bottom") +
+  theme(legend.title=element_blank())
+
+
+
+```
+
+
+```{r echo=FALSE, out.width = '80%'}
+plot(turkeyTrajectory)
+```
+
+
+Turkey has definitely not make a good start and not on a good trajectory. 
