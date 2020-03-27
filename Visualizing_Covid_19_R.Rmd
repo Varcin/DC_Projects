@@ -265,7 +265,7 @@ top7_line <- ggplot(top_countries_by_total_cases, aes(x=date, y=cum_cases, color
 
 ```
 
-Even though the outbreak was first identified in China, there is no other country from East Asia in the below table. Four of the listed countries (France, Germany, Italy, Spain and Switzerland) are in Europe and share borders. To get more context, we can plot these countries' confirmed cases over time. 
+Even though the outbreak was first identified in China, there is no other country from East Asia in the below table. Four of the listed countries (France, Germany, Italy, Spain and UK) are in Europe and share borders. To get more context, we can plot these countries' confirmed cases over time. 
 
 
 
@@ -313,4 +313,4 @@ plot(turkeyTrajectory)
 ```
 
 
-Turkey has definitely not made a good start and not on a good trajectory. 
+Turkey has definitely not made a good start and not on a good trajectory.  
