@@ -1,7 +1,7 @@
 ---
 title: "The Impact of Climate Change on Birds"
 author: "Bilsay Varcin"
-date: "March 24, 2020"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
 output: html_document
 ---
 
@@ -10,4 +10,294 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+## Tracking a changing climate
+
+The climate is changing around the world. The impacts of climate change are felt in many different areas, but they are particularly noticeable in their effects on birds. Many bird species are moving north, if they can, to stay in climatic conditions that are suitable for them.
+
+Our analysis will use data from the [UK Met Office](https://www.metoffice.gov.uk/research/climate/maps-and-data/data/index) together with records from the [Global Biodiversity Information Facility](https://www.gbif.org/) to build our very own species distribution model using machine learning. This model will be able to predict where our bird species of interest is likely to occur in the future - information that is invaluable to conservation organization working on the ground to preserve these species and save them from extinction!
+
+In this notebook, we will model the Scottish crossbill (Loxia scotica). The Scottish crossbills is a small bird that inhabits the cool Scottish forests and feeds on pine seeds. Only ~ 20,000 individuals of this species are alive today. The code and the data sources in this project can be reapplied to any other species we may be interested in studying.
+
+```{r echo=FALSE, out.width = '60%', fig.align='left'}
+knitr::include_graphics("statics/Loxia.jpg")
+```
+
+
+
+```{r Load Data, echo=F, include=F, message=F}
+
+# Load in the tidyverse, raster, and sf packages
+library(tidyverse)
+library(raster)
+library(sf)
+library(ggthemes)
+
+
+# Read the climate data from an rds file
+climate  <- read_rds("data/climate_raster.rds")
+
+# Have a look at the variables in the climate data
+colnames(climate)
+
+# Convert to SpatialPixelDataFrame for plotting
+climate_df <- climate %>% 
+  mutate(rasters = map(.x = rasters, ~ as_tibble(as(.x, "SpatialPixelsDataFrame")))) %>%
+  unnest(cols = c(rasters))
+  
+```
+
+## Mapping a changing climate
+
+We have loaded the pre-processed climate data and converted it to a SpatialPixelDataFrame. This data frame now contains all the information we need:
+
+the decade of observation,
+spatial coordinates (x, y)
+six selected climatic variables (minimum.temperature, maximum.temperature, rainfall, wind.speed, snow.lying, air.frost)
+An excellent first step in any analysis is visualizing the data. Visualizing the data makes sure the data import worked, and it helps us develop intuition about the patterns in our dataset. Here we are dealing with spatial data - let us create maps! We will start with two maps: one map of the climatic conditions in 1970, and one map of the climatic conditions in 2010. Our climate data has several variables, so let us pick minimum.temperature for now.
+
+```{r Before After Map, echo=F}
+
+
+# Filter the data to plot
+ggp_temperature <- climate_df %>%
+  filter(decade %in% c(1970, 2010)) %>%
+  # Create the plot
+  ggplot(aes(x = x, y = y)) + geom_tile(aes(fill = minimum.temperature)) +
+  # Style the plot with options ideal for maps
+  theme_map() +
+  coord_equal() +
+  facet_grid(~ decade) + scale_fill_distiller(palette = "Spectral") + 
+  theme(legend.title = element_blank(), legend.position = "bottom") +
+  labs(title = "Minimum of Average Monthly Temperature (Celsius)", caption = 'Source: MetOffice UK')
+
+# Display the map
+ggp_temperature
+
+```
+
+
+
+## Fieldwork in the digital age - download the data
+
+Now we need to obtain species occurrence records. This used to be the main challenge in biogeography. Natural historians, such as Charles Darwin and Alexander von Humboldt, traveled around the globe for years on rustic sail ships collecting animal and plant specimens to understand the natural world. Today, we stand on the shoulders of giants. Getting data is fast and easy thanks to two organizations:
+
+[The Global Biodiversity Information Facility](https://www.gbif.org/) (GBIF), an international network and research infrastructure aimed at providing anyone, anywhere, open access to data about life on Earth. We will use their data in this project.
+
+[rOpenSci](https://ropensci.org/), a non-profit initiative that develops open source tools for academic data sets. Their package rgbif will help us access the species data.
+
+
+```{r rgbif, echo=F, include=F, message=F}
+
+library(rgbif)
+source("data/occ_search.R")
+
+# Call the API to get the occurrence records of this species
+gbif_response <- rgbif::occ_search(
+  scientificName = "Loxia scotica", country = "GB",
+  hasCoordinate = TRUE, hasGeospatialIssue = FALSE, limit = 2000)
+
+# Inspect the class and names of gbif_response
+class(gbif_response)
+names(gbif_response)
+
+# Print the first six lines of the data element in gbif_response
+#head(gbif_response, 1)
+
+```
+
+```{r Birds Cleaned, echo=F, include=F, message=F}
+
+library(lubridate)
+
+birds_dated <- gbif_response$data %>% 
+  # Create a new column specifying the decade of observation
+  mutate(decade = ymd_hms(eventDate) %>% round_date("10y") %>% year())
+
+birds_cleaned <- birds_dated %>%
+  filter(issues == "" &
+    str_detect(license, "http://creativecommons.org/") &
+    # No records before 1970s decade or after 2010s decade
+    (decade >= 1970 & decade <= 2010)) %>%
+  transmute(decade = decade, x = decimalLongitude, y = decimalLatitude) %>%
+  arrange(decade)
+
+```
+
+
+## Nesting the data
+
+We have cleaned the data, but there is a problem. We want to know the climatic conditions at the location of the bird observation at the time of the observation. This is tricky because we have climate data from multiple decades. How do we match each bird observation to the correct climate raster cell?
+
+We will use a nifty trick: we can nest() data in a list column. The result is a data frame where the grouping columns do not change, and a list column of aggregated data from each group is added. List columns can hold many different kinds of variables such as vectors, data frames, and even objects. For example, the climate data that we imported earlier was already nested by decade and had a list column (rasters) that contained a rasterStack object for each decade.
+
+
+```{r Bird Nested, echo = F}
+
+# "Nest" the bird data
+birds_nested <- birds_cleaned %>%
+  group_by(decade) %>% nest()
+
+#head(birds_nested)
+
+# Calculate the total number of records per decade
+birds_counted <- birds_nested %>%
+  mutate(n = map_dbl(.x=data, .f=nrow))
+
+#head(birds_counted)
+```
+
+
+## Making things spatial - projecting our observations
+Excellent! Both our datasets are nested by decade now. We have one more step before we extract the climatic conditions at bird locations. Locations in birds_counted are latitude and longitude coordinates. R doesn't know that these are spatial information. We need to convert and project our data.
+
+Projections are necessary because maps are 2-dimensional, but the earth is 3-dimensional. There is no entirely accurate way to represent the surface of a 3D sphere in 2D. Projections are sets of conventions to help us with this issue. GBIF hosts data from around the world and uses a global projection (WGS84). The Met Office is a UK organization and provides data in the British National Grid projection (BNG).
+
+To project spatial data, use Coordinate Reference System (CRS) strings.
+
+
+```{r Geo Projection, echo=F}
+
+# Define geographical projections
+proj_latlon <- st_crs("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+proj_ukgrid <- st_crs("+init=epsg:27700")
+
+# Convert records to spatial points and project them
+birds_presences <- birds_counted %>% 
+  mutate(presences = map(data, ~ .x %>%
+    # Specify the current projection
+    st_as_sf(coords = c("x", "y"), crs = proj_latlon) %>%
+    # Transform to new projection
+    st_transform(crs = proj_ukgrid)))
+
+```
+
+## Extract exactly what we want
+
+Now we are ready to combine the two datasets and extract the climatic conditions at each location for the given decade. This is where the nested structure comes in handy! We join the data frames by their grouping column and can rest assured that the data in the list columns are matched up correctly. This allows us to operate on the list column variables element-wise using the map() family functions.
+
+
+```{r Climate and Bird, echo=F}
+
+# Combine the bird data and the climate data in one data frame
+birds_climate <- full_join(birds_presences, climate, by = "decade")
+
+presence_data <- map2_df(
+  .x = birds_climate[["rasters"]],
+  .y = birds_climate[["presences"]],
+  # extract the raster values at presence locations
+  ~ raster::extract(x=.x, y=.y) %>% 
+    as_tibble() %>% 
+    mutate(observation = "presence"))
+
+```
+
+
+
+## Pseudo-absences
+
+To run a machine learning model, the classification algorithm needs two classes: presences and absences. Our presences are the observations from GBIF. Absences are a lot harder to get.
+
+The difficulty is because of information asymmetry between the presences and absences. With a bird observation we are sure it occurred at that location, but to be certain the bird does not occur somewhere, we would have to continuously monitor the site.
+
+One way to deal with this problem is to generate "pseudo-absences". Pseudo-absences are a random sample from the entire study area. We assume that the species does not occur at the random locations and our hope is that the average actual probability of occurrence for the bird in these random locations is low enough to give our algorithm something to learn
+
+
+```{r Pseudo Absence, echo=F}
+
+# Define helper function for creating pseudo-absence data
+create_pseudo_absences <- function(rasters, n, ...) {
+    set.seed(12345)
+    sampleRandom(rasters, size = n * 5, sp = TRUE) %>% 
+    raster::extract(rasters, .) %>% as_tibble() %>%
+    mutate(observation = "pseudo_absence")
+}
+
+# Create pseudo-absence proportional to the total number of records per decade
+pseudo_absence_data <- pmap_df(.l = birds_climate, .f = create_pseudo_absences)
+
+# Combine the two datasets
+model_data <- bind_rows(presence_data, pseudo_absence_data) %>%
+  mutate(observation = factor(observation)) %>% na.omit()
+
+```
+
+## Making models - with caret
+
+We are ready to train our model. We will use glmnet, which fits a generalized logistic regression (glm) with elastic net regularization (net). Our algorithm has several "hyperparameters". These are variables used by the machine learning algorithm to learn from the data. They influence the performance of the model and often interact with one another, so it is difficult to know the right settings apriori.
+
+To figure out a good set of hyperparameters, we need to try several possible scenarios to see which ones work best. caret makes this easy. All we need to do is define a "tuning grid" with sets of possible values for each training parameter. Then use cross-validation to evaluate how well the different combinations of hyperparameters did building the predictive model.
+
+
+```{r Model, echo=F}
+
+# Load caret and set a reproducible seed
+library(caret)
+set.seed(12345)
+
+# Create a tuning grid with sets of hyperparameters to try
+tuneGrid <- expand.grid(alpha = c(0, 0.5, 1), lambda = c(.003, .01, .03, .06))
+
+# Create settings for model training
+trControl <- trainControl(method = 'repeatedcv', number = 5, repeats = 1,
+  classProbs = TRUE, verboseIter = FALSE, summaryFunction = twoClassSummary)
+
+# Fit a statistical model to the data and plot
+model_fit <- train(
+  observation ~ ., data = model_data,
+  method = "glmnet", family = "binomial", metric = "ROC",
+  tuneGrid = tuneGrid, trControl = trControl)
+
+plot(model_fit)
+
+```
+
+
+## Prediction probabilities
+
+Congratulations, we have built our first species distribution model! Next, we will use it to predict the probability of occurrence for our little crossbill across the UK! We will make a prediction for each decade and each cell of the grid. Since we fit a logistic regression model, we can choose to predict the probability. In our case, this becomes the "probability of occurrence" for our species.
+
+
+```{r Predict, echo=F, include=F}
+# Use our model to make a prediction
+climate_df[["prediction"]] <- predict(
+    object = model_fit,
+    newdata = climate_df,
+    type = "prob")[["presence"]]
+
+head(climate_df)
+
+```
+
+
+## A map says more than a thousand words
+
+We have our predictions, but they are not in a digestible format. It is tough to figure out what is going on from that large table of numbers, and it would be even more challenging to convince a politician, the general public, or a local decision maker with it.
+
+It would be great to visualize the predictions so we can see the patterns and how they change over time. A picture says more than a thousand words. And what says even more than a picture (at least if you are a geographer)? A colored map! Let us create another map that shows our predictions of a changing climate in the UK, from 1965 to 2015.
+
+```{r Habitat, echo=F, message=F}
+
+library(viridis)
+
+# Create the plot
+ggp_changemap <- ggplot(climate_df, aes(x=x,y=y, fill=prediction)) +
+  geom_tile() +
+  # Style the plot with the appropriate settings for a map
+  theme_map() +
+  coord_equal() +
+  scale_fill_viridis(option = "A") + theme(legend.position = "bottom") +
+  # Add faceting by decade
+  facet_grid(~ decade) + 
+  scale_fill_distiller(palette = "Spectral") + 
+  theme(legend.title = element_blank(), legend.position = "bottom") +
+  labs(title = 'Habitat Suitability', subtitle = 'by decade',
+       caption = 'Source:\nGBIF data and\nMetOffice UK climate data',
+       fill = 'Habitat Suitability [0 low - high 1]')
+
+# Display the plot
+ggp_changemap
+
+
+
+```
 
