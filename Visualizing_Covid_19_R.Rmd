@@ -270,7 +270,7 @@ Even though the outbreak was first identified in China, there is no other countr
 
 
 ```{r echo=FALSE, out.width = '80%'}
-plot(top7_line)
+plot(top7_line) 
 ```
 
 
