@@ -1,0 +1,275 @@
+---
+title: "Health Survey Data Analysis of BMI"
+author: "Bilsay Varcin"
+date: "March 30, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Survey of BMI and physical activity
+
+We've all taken a survey at some point, but do you ever wonder what happens to your answers? Surveys are given to a carefully selected sample of people with the goal of generalizing the results to a much larger population.
+
+The [National Health and Nutrition Examination Survey (NHANES)](https://www.cdc.gov/nchs/nhanes/index.htm) data is a complex survey of tens of thousands of people designed to assess the health and nutritional status of adults and children in the United States. The NHANES data includes many measurements related to overall health, physical activity, diet, psychological health, socioeconomic factors and more.
+
+Depending on the sampling design, each person has a sampling weight that quantifies how many people in the larger population their data is meant to represent. In this notebook, we'll apply survey methods that use sampling weights to estimate and model relationships between measurements.
+
+We are going to focus on a common health indicator, Body Mass Index ([BMI](https://en.wikipedia.org/wiki/Body_mass_index) kg/m2), and how it is related to physical activity. We'll visualize the data and use survey-weighted regression to test for associations.
+
+
+```{r Load Data, echo=F, message=F}
+# Load the NHANES and dplyr packages
+library(NHANES)
+library(dplyr)
+
+# Load the NHANESraw data
+data("NHANESraw")
+
+# Take a glimpse at the contents
+glimpse(NHANESraw)
+
+```
+
+
+## Visualize survey weight and strata variables
+
+We see from glimpse() that the NHANESraw data has many health measurement variables. It also contains a sampling weight variable WTMEC2YR.
+
+Since NHANESraw data spans 4 years (2009-2012) and the sampling weights are based on 2 years of data, we first need to create a weight variable that scales the sample across the full 4 years. Currently the weights sum to 2 times the US population number, so we need to divide the 2-year weight in half so that in total, the sum of the weights is equal to the US population.
+
+The NHANES data has oversampled some geographic regions and specific minority groups. By examining the distribution of sampling weights for each race, we can see that Whites are undersampled and have higher weights while oversampled Black, Mexican, Hispanic people have lower weights since each sampled person in these minority groups represents fewer US people.
+
+
+```{r Weights by Race, echo=F, message=F}
+
+# Load the ggplot2 package
+library(ggplot2)
+
+# Use mutate to create a 4-year weight variable and call it WTMEC4YR
+NHANESraw <- NHANESraw %>% mutate(WTMEC4YR = WTMEC2YR/2)
+
+# Calculate the sum of this weight variable
+ sum(NHANESraw$WTMEC4YR)
+
+# Plot the sample weights using boxplots, with Race1 on the x-axis
+ggplot(NHANESraw, aes(x = Race1, y = WTMEC4YR)) + geom_boxplot()
+
+```
+
+## Specify the survey design
+
+We will now use the survey package to specify the complex survey design that we will use in later analyses. We need to specify the design so the sampling weights and design are used properly in the statistical models.
+
+The NHANESraw data contains a strata variable SDMVSTRA, and a cluster id variable (also known as a primary sampling unit, PSU), SDMVPSU, that accounts for design effects of clustering. These clusters (PSUs) are nested within strata.
+
+```{r Sample Design, echo=F, message=F}
+
+# Load the survey package
+library(survey)
+
+# Specify the survey design
+nhanes_design <- svydesign(
+    data = NHANESraw,
+    strata = ~SDMVSTRA,
+    id = ~SDMVPSU,
+    nest = T,
+    weights = ~WTMEC4YR)
+
+# Print a summary of this design
+summary(nhanes_design)
+
+```
+
+## Subset the data
+
+Analysis of survey data requires careful consideration of the sampling design and weights at every step. Something as simple as filtering the data becomes complicated when weights are involved.
+
+When we wish to examine a subset of the data (i.e. the subpopulation of adult Hispanics with diabetes, or pregnant women), we must explicitly specify this in the design. We cannot simply remove that subset of the data through filtering the raw data because the survey weights will no longer be correct and will not add up to the full US population.
+
+BMI categories are different for children and young adults younger than 20 so we will subset the data to only analyze adults of at least 20 years of age.
+
+
+```{r Age20, echo=F}
+
+# Select adults of Age >= 20 with subset
+nhanes_adult <- subset(nhanes_design, Age >= 20)
+
+# Print a summary of this subset
+summary(nhanes_adult)
+
+# Compare the number of observations in the full data to the adult data
+nrow(nhanes_design)
+nrow(nhanes_adult)
+
+```
+
+
+## Visualizing BMI
+
+We let svydesign() do its magic, but how does this help us learn about the full US population? With survey methods, we can use the sampling weights to estimate the true distributions of measurements within the entire population. This works for many statistics such as means, proportions, and standard deviations.
+
+We'll use survey methods to estimate average BMI in the US adult population and also to draw a weighted histogram of the distribution.
+
+```{r BMI Histogram, echo=F, message=F}
+
+# Calculate the mean BMI in NHANESraw
+bmi_mean_raw <- NHANESraw %>% 
+    filter(Age >= 20) %>%
+    summarize(mean(BMI, na.rm = TRUE))
+bmi_mean_raw
+
+# Calculate the survey-weighted mean BMI of US adults
+bmi_mean <- svymean(~BMI, design = nhanes_adult, na.rm = TRUE)
+bmi_mean
+
+# Draw a weighted histogram of BMI in the US population
+NHANESraw %>% 
+  filter(Age >= 20) %>%
+    ggplot(mapping = aes(x = BMI, weight = WTMEC4YR)) + 
+    geom_histogram()+
+    geom_vline(xintercept = coef(bmi_mean), color="red") +
+    scale_y_continuous(labels=scales::comma)
+
+
+```
+
+
+## Is BMI lower in physically active people?
+
+The distribution of BMI looks to be about what we might expect with most people under 40 kg/m2 and a slight positive skewness because a few people have much higher BMI. Now to the question of interest: does the distribution of BMI differ between people who are physically active versus those who are not physically active? We can visually compare BMI with a boxplot as well as formally test for a difference in mean BMI.
+
+
+```{r BMIvsActive, echo=F}
+
+# Load the broom library
+library(broom)
+
+# Make a boxplot of BMI stratified by physically active status
+NHANESraw %>% 
+  filter(Age>=20) %>%
+  ggplot(aes(x=PhysActive, y=BMI, weight = WTMEC4YR)) +
+  geom_boxplot()
+
+# Conduct a t-test comparing mean BMI between physically active status
+survey_ttest <- svyttest(BMI~PhysActive, design = nhanes_adult)
+
+# Use broom to show the tidy results
+tidy(survey_ttest)
+
+```
+
+
+## Could there be confounding by smoking? (part 1)
+
+The relationship between physical activity and BMI is likely not so simple as "if you exercise you will lower your BMI." In fact, many other lifestyle or demographic variables could be confounding this relationship. One such variable could be smoking status. If someone smokes, is he or she more or less likely to be physically active? Are smokers more likely to have higher or lower BMI? We can examine these relationships in the survey data. Note that many people chose not to answer the smoking question, so we reduce our sample size when looking at this data.
+
+First, let's look at the relationship between smoking and physical activity.
+
+```{r ActivevsSmoke, echo=F, message=F}
+
+# Estimate the proportion who are physically active by current smoking status
+phys_by_smoke <- svyby(~PhysActive, by = ~SmokeNow, 
+                       FUN = svymean, 
+                       design = nhanes_adult, 
+                       keep.names = FALSE)
+
+# Print the table
+phys_by_smoke
+
+# Plot the proportions
+ggplot(data = phys_by_smoke, 
+       aes(x = SmokeNow, y = PhysActiveYes, fill = SmokeNow)) +
+    geom_col() + 
+    ylab("Proportion Physically Active")
+
+```
+
+
+## Could there be confounding by smoking? (part 2)
+
+Now let's examine the relationship between smoking with BMI.
+
+```{r BMIvsSmoke, echo=F, message=F}
+
+# Estimate mean BMI by current smoking status
+BMI_by_smoke <- svyby(~BMI, by = ~SmokeNow, 
+                      FUN = svymean,
+                      design = nhanes_adult,
+                      na.rm = TRUE)
+BMI_by_smoke
+
+# Plot the distribution of BMI by current smoking status
+NHANESraw %>% 
+  filter(Age>=20, !is.na(SmokeNow)) %>% 
+  ggplot(aes(x=SmokeNow, y=BMI, weight = WTMEC4YR)) +
+  geom_boxplot()
+
+```
+
+## Add smoking in the mix
+
+We saw that people who smoke are less likely to be physically active and have a lower BMI on average. We also saw that people who are not physically active have a higher BMI on average. How do these seemingly conflicting associations work together? To get a better sense of what's going on, we can compare BMI by physical activity stratified by smoking status.
+
+
+```{r SmokeBMIActive, echo=F, message=F}
+
+# Plot the distribution of BMI by smoking and physical activity status
+NHANESraw %>% 
+  filter(Age>=20) %>% 
+  ggplot(aes(x=SmokeNow, y=BMI, color=PhysActive, weight = WTMEC4YR)) +
+  geom_boxplot()
+
+```
+
+
+## Incorporate possible confounding in the model
+
+In the above plot, we see that people who are physically active tend to have lower BMI no matter their smoking status, and this is true even if they didn't answer the question. However, we also see that smokers have lower BMI in general. Also, looking closely we see the difference in BMI comparing physically active people to non-physically active people is slightly smaller in smokers than in non-smokers.
+
+Previously, we used a simple t-test to compare mean BMI in physically active people and non-physically active people. In order to adjust for smoking status, as well as other possible confounders or predictors of BMI, we can use a linear regression model with multiple independent variables. When using survey data, we use a weighted linear regression method which is a special case of generalized linear models (GLMs).
+
+```{r Glm, echo=F, message=F}
+
+# Fit a multiple regression model
+mod1 <- svyglm(BMI ~ SmokeNow * PhysActive, design = nhanes_adult)
+
+# Tidy the model results
+tidy_mod1 <- tidy(mod1)
+tidy_mod1
+
+# Calculate expected mean difference in BMI for activity within non-smokers
+diff_non_smoke <- tidy_mod1 %>% 
+    filter(term == "PhysActiveYes") %>% 
+    select(estimate)
+#diff_non_smoke
+
+# Calculate expected mean difference in BMI for activity within smokers
+diff_smoke <- tidy_mod1 %>% 
+    filter(term %in% c("PhysActiveYes", "SmokeNowYes:PhysActiveYes")) %>% 
+    summarize(estimate = sum(estimate))
+#diff_smoke
+
+```
+
+## What does it all mean?
+
+We fit a linear regression model where the association of physical activity with BMI could vary by smoking status. The interaction between physical activity and smoking has a small p-value, which suggests the association does vary by smoking status. The difference between physically active and non-physically active people is larger in magnitude in the non-smoker population.
+
+We should check the model fit and technical assumptions of our regression model. Then, we can conclude that physically active people tend to have lower BMI, as do smokers. Although they have similar effect sizes, we probably wouldn't want to recommend smoking along with exercise!
+
+In order to determine whether physical activity causes lower BMI, we would need to use causal inference methods or a randomized control study. We can adjust for other possible confounders in our regression model to determine if physical activity is still associated with BMI, but we fall short of confirming that physical activity itself can lower one's BMI.
+
+```{r GLM2, echo=F}
+
+# Adjust mod1 for other possible confounders
+mod2 <- svyglm(BMI ~ PhysActive*SmokeNow + Race1 + Alcohol12PlusYr + Gender, 
+               design = nhanes_adult)
+
+# Tidy the output
+tidy(mod2)
+
+```
+
