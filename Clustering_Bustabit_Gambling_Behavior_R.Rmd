@@ -1,0 +1,324 @@
+---
+title: "Clustering Bustabit Gambling Behavior"
+author: "Bilsay Varcin"
+date: "March 31, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## A preliminary look at the Bustabit data
+
+The similarities and differences in the behaviors of different people have long been of interest, particularly in psychology and other social science fields. Understanding human behavior in particular contexts can help us to make informed decisions. Consider a game of poker - understanding why players raise, call, and fold in various situations can provide a distinct advantage competitively.
+
+Along these lines, we are going to focus on the behavior on **online gamblers** from a platform called [Bustabit](https://www.bustabit.com/). There are a few basic rules for playing a game of Bustabit:
+
+1. You bet a certain amount of money (in Bits, which is 1 / 1,000,000th of a Bitcoin) and you win if you cash out before the game **busts**.
+
+2. Your win is calculated by the multiplier value at the moment you cashed out. For example, if you bet 100 and the value was 2.50x at the time you cashed out, you win 250. In addition, a percentage Bonus per game is multiplied with your bet and summed to give your final Profit in a winning game. Assuming a Bonus of 1%, your Profit for this round would be (100 x 2.5) + (100 x .01) - 100 = 151
+
+3. The multiplier increases as time goes on, but if you wait too long to cash out, you may bust and lose your money.
+
+4. Lastly, the house maintains slight advantages because in 1 out of every 100 games, everyone playing busts.
+
+Below we see an example of a winning game:
+
+```{r echo=FALSE, out.width = '95%', fig.align='center'}
+
+knitr::include_graphics("statics/bustabit_win.gif")
+
+```
+
+And a losing game, for comparison:
+
+
+```{r echo=FALSE, out.width = '95%', fig.align='center'}
+
+knitr::include_graphics("statics/bustabit_loss.gif")
+
+```
+
+
+Our goal will be to define relevant **groups** or **clusters** of Bustabit users to identify what patterns and behaviors of gambling persist. Can we describe a particular group as risk-averse? Is there a set of gamblers that have a strategy that seems to be more successful in the long term?
+
+The data you will be working with includes over 40000 games of Bustabit by a bit over 4000 different players, for a total of 50000 rows (one game played by one player). The data includes the following variables:
+
+1. **Id** - Unique identifier for a particular row (game result for one player)
+
+2. **GameID** - Unique identifier for a particular game
+
+3. **Username** - Unique identifier for a particular player
+
+4. **Bet** - The number of Bits (1 / 1,000,000th of a Bitcoin) bet by the player in this game
+
+5. **CashedOut** - The multiplier at which this particular player cashed out
+
+6. **Bonus** - The bonus award (in percent) awarded to this player for the game
+
+7. **Profit** - The amount this player won in the game, calculated as (Bet CashedOut) + (Bet Bonus) - Bet
+
+8. **BustedAt** - The multiplier value at which this game busted
+
+9. **PlayDate** - The date and time at which this game took place
+
+Let's begin by doing an exploratory dive into the Bustabit data!
+
+```{r Load Data, echo=F, message=F}
+
+# Load the tidyverse
+library(tidyverse)
+
+# Read in the bustabit gambling data 
+bustabit <- read_csv("data/bustabit.csv")
+
+# Look at the first five rows of the data
+head(bustabit)
+
+# Find the highest multiplier (BustedAt value) achieved in a game
+bustabit %>%
+    arrange(desc(BustedAt)) %>%
+    slice(1)
+
+```
+
+
+## Deriving relevant features for clustering
+
+The Bustabit data provides us with many features to work with, but to better quantify player behavior, we need to derive some more variables. Currently, we have a Profit column which tells us the amount won in that game, but no indication of how much was lost if the player busted, and no indicator variable quantifying whether the game itself was a win or loss overall. Hence, we will derive or modify the following variables:
+
+1. **CashedOut** - If the value for CashedOut is NA, we will set it to be 0.01 greater than the BustedAt value to signify that the user failed to cash out before busting
+
+2. **Profit** - If the value for Profit is NA, we will set it to be zero to indicate no profit for the player in that game
+
+3. **Losses** - If the new value for Profit is zero, we will set this to be the amount the player lost in that game, otherwise we will set it to zero. This value should always be zero or negative
+
+4. **GameWon** - If the user made a profit in this game, the value should be 1, and 0 otherwise
+
+5. **GameLost**  If the user had a loss in this game, the value should be 1, and 0 otherwise
+
+```{r ProfitLoss, echo=F}
+
+# Create the new feature variables 
+bustabit_features <- bustabit %>% 
+  mutate(CashedOut = ifelse(is.na(CashedOut), BustedAt + .01, CashedOut),
+         Profit = ifelse(is.na(Profit), 0, Profit),
+         Losses = ifelse(Profit == 0, -1*Bet, 0),
+         GameWon = ifelse(Profit == 0, 0, 1),
+         GameLost = ifelse(Profit == 0, 1, 0))
+
+# Look at the first five rows of the features data
+head(bustabit_features)
+
+```
+
+
+## Creating per-player statistics
+
+The primary task at hand is to cluster Bustabit **players** by their respective gambling habits. Right now, however, we have features at the per-game level. The features we've derived would be great if we were interested in clustering properties of the games themselves - we know things about the BustedAt multiplier, the time the game took place, and lots more. But to better quantify player behavior, we must group the data by player (Username) to begin thinking about the relationship and similarity between groups of players. Some per-player features we will create are:
+
+
+1. **AverageCashedOut** - The average multiplier at which the player cashes out
+
+2. **AverageBet** - The average bet made by the player
+
+3. **TotalProfit** - The total profits over time for the player
+
+4. **TotalLosses** - The total losses over time for the player
+
+5. **GamesWon** - The total number of individual games the player won
+
+6. **GamesLost** - The total number of individual games the player lost
+
+With these variables, we will be able to potentially group similar users based on their typical Bustabit gambling behavior.
+
+
+```{r BustabitByUser, echo=F}
+
+# Group by players to create per-player summary statistics
+bustabit_clus <- bustabit_features %>%
+  group_by(Username) %>%
+  summarize(AverageCashedOut = mean(CashedOut), 
+            AverageBet = mean(Bet),
+            TotalProfit = sum(Profit),
+            TotalLosses = sum(Losses), 
+            GamesWon = sum(GameWon),
+            GamesLost = sum(GameLost))
+
+# View the first five rows of the data
+head(bustabit_clus, n = 5)
+
+```
+
+## Scaling and normalization of the derived features
+
+The variables are on very different **scales** right now. For example, AverageBet is in bits (1/1000000 of a Bitcoin), AverageCashedOut is a multiplier, and GamesLost and GamesWon are counts. As a result, we would like to **normalize** the variables such that across clustering algorithms, they will have approximately equal weighting.
+
+One thing to think about is that in many cases, we may actually want a particular numeric variable to maintain a higher weight. This could occur if there is some prior knowledge regarding, for example, which variable might be most important in terms of defining similar Bustabit behavior. In this case, without that prior knowledge, we will forego the weighting of variables and scale everything. We are going to use **mean-sd** standardization to scale the data. Note that this is also known as a **Z-score**.
+
+Note that we could compute the Z-scores by using the base R function scale(), but we're going to write our own function in order to get the practice.
+
+```{r Z_Score, echo=F}
+
+# Create the mean-sd standardization function
+mean_sd_standard <- function(x) {
+    (x - mean(x))/sd(x)
+}
+
+# Apply the function to each numeric variable in the clustering set
+bustabit_standardized <- bustabit_clus %>%
+    mutate_if(is.numeric, mean_sd_standard)
+              
+# Summarize our standardized data
+summary(bustabit_standardized)
+
+```
+
+## Cluster the player data using K means
+
+With standardized data of per-player features, we are now ready to use K means clustering in order to cluster the players based on their online gambling behavior. K means is implemented in R in the kmeans() function from the stats package. This function requires the centers parameter, which represents the number of clusters to use.
+
+Without prior knowledge, it is often difficult to know what an appropriate choice for the number of clusters is. We will begin by choosing **five**. This choice is rather arbitrary, but represents a good initial compromise between choosing too many clusters (which reduces the interpretability of the final results), and choosing too few clusters (which may not capture the distinctive behaviors effectively). Feel free to play around with other choices for the number of clusters and see what you get instead!
+
+One subtlety to note - because the K means algorithm uses a random start, we are going to set a random seed first in order to ensure the results are reproducible.
+
+```{r Kmeans, echo=F}
+
+# Choose 20190101 as our random seed
+set.seed(20190101)
+
+# Cluster the players using kmeans with five clusters
+cluster_solution <- kmeans(select(bustabit_standardized, -Username), centers = 5)
+
+# Store the cluster assignments back into the clustering data frame object
+bustabit_clus$cluster <- factor(cluster_solution$cluster)
+
+# Look at the distribution of cluster assignments
+table(bustabit_clus$cluster)
+
+```
+
+## Compute averages for each cluster
+
+We have a clustering assignment which maps every Bustabit gambler to one of five different groups. To begin to assess the quality and distinctiveness of these groups, we are going to look at **group averages** for each cluster across the original variables in our clustering dataset. This will, for example, allow us to see which cluster tends to make the largest bets, which cluster tends to win the most games, and which cluster tends to lose the most money. This will provide us with our first clear indication as to whether the behaviors of the groups appear distinctive!
+
+```{r Cluster Analysis, echo=F, message=F}
+
+# Group by the cluster assignment and calculate averages
+bustabit_clus_avg <- bustabit_clus %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean, na.rm=T)
+
+# View the resulting table
+bustabit_clus_avg
+
+```
+
+
+## Visualize the clusters with a Parallel Coordinate Plot
+
+We can already learn a bit about our cluster groupings by looking at the previous table. We can clearly see that there is a group that makes very large bets, a group that tends to cash out at very high multiplier values, and a group that has played many games of Bustabit. We can visualize these group differences graphically using a Parallel Coordinate Plot or PCP. To do so, we will introduce one more kind of scaling: min-max scaling, which forces each variable to fall between 0 and 1.
+
+Other choices of scaling, such as the Z-score method from before, can work effectively as well. However, min-max scaling has the advantage of interpretability - a value of 1 for a particular variable indicates that cluster has the highest value compared to all other clusters, and a value of 0 indicates that it has the lowest. This can help make relative comparisons between the clusters more clear.
+
+The ggparcoord() function from GGally will be used to produce a Parallel Coordinate Plot. Note that this has a built-in argument scale to perform different scaling options, including min-max scaling. We will set this option to "globalminmax" to perform no scaling, and write our own scaling routine for practice. If you are interested, you can look at the function definition for ggparcoord() to help you write our scaling function!
+
+
+```{r Min Max Standardization, echo=F, message=F}
+
+# Create the min-max scaling function
+min_max_standard <- function(x) {
+    (x - min(x)) /  (max(x) - min(x) )
+}
+
+# Apply this function to each numeric variable in the bustabit_clus_avg object
+bustabit_avg_minmax <- bustabit_clus_avg %>%
+    mutate_if(is.numeric, min_max_standard)
+
+# Load the GGally package
+library(GGally)
+              
+# Create a parallel coordinate plot of the values
+ggparcoord(bustabit_avg_minmax, columns = 2:7, 
+           groupColumn = 1, scale = "globalminmax", order = "skewness") +   theme(legend.position="bottom") 
+
+```
+
+
+## Visualize the clusters with Principal Components
+
+One issue with plots like the previous is that they get more unwieldy as we continue to add variables. One way to solve this is to use the Principal Components of a dataset in order to reduce the dimensionality to aid in visualization. Essentially, this is a two-stage process:
+
+1. We extract the principal components in order to reduce the dimensionality of the dataset so that we can produce a scatterplot in two dimensions that captures the underlying structure of the higher-dimensional data.
+
+2. We then produce a scatterplot of each observation (in this case, each player) across the two Principal Components and color according to their cluster assignment in order to visualize the separation of the clusters.
+
+This plot provides interesting information in terms of the similarity of any two players. In fact, you will see that players who fall close to the boundaries of clusters might be the ones that exhibit the gambling behavior of a couple of different clusters. After you produce your plot, try to determine which clusters seem to be the most "different." Also, try playing around with different projections of the data, such as PC3 vs. PC2, or PC3 vs. PC1, to see if you can find one that better differentiates the groups.
+
+```{r PCA, echo=F}
+
+# Calculate the principal components of the standardized data
+my_pc <- as.data.frame(prcomp(select(bustabit_standardized, -Username))$x)
+
+# Store the cluster assignments in the new data frame
+my_pc$cluster <- bustabit_clus$cluster
+
+# Use ggplot() to plot PC2 vs PC1, and color by the cluster assignment
+p1 <- ggplot(my_pc, aes(x=PC1, y=PC2, color = cluster)) +
+    geom_point() +  
+    theme(legend.position="bottom") 
+
+# View the resulting plot
+p1
+
+```
+
+
+## Analyzing the groups of gamblers our solution uncovered
+
+Though most of the statistical and programmatical work has been completed, possibly the most important part of a cluster analysis is to interpret the resulting clusters. This often is the most desired aspect of the analysis by clients, who are hoping to use the results of your analysis to inform better business decision making and actionable items. As a final step, we'll use the parallel coordinate plot and cluster means table to interpret the Bustabit gambling user groups! Roughly speaking, we can breakdown the groups as follows:
+
+
+**Cautious Commoners:**
+
+This is the largest of the five clusters, and might be described as the more casual Bustabit players. They've played the fewest number of games overall, and tend to make more conservative bets in general.
+
+**Strategic Addicts:**
+
+These users play a lot of games on Bustabit, but tend to keep their bets under control. As a result, they've made on average a net positive earnings from the site, in spite of having the most games played. They seem to maintain a strategy (or an automated script/bot) that works to earn them money.
+
+**Risky Commoners:**
+
+These users seem to be a step above the Cautious Commoners in their Bustabit gambling habits, making larger average bets, and playing a larger number of games on the site. As a result, though they have about the same number of average games won as the Risk Takers, they have a significantly higher number of games lost.
+
+**Risk Takers:**
+
+These users have played only a couple games on average, but their average cashed out value is significantly higher than the other clusters, indicating that they tend to wait for the multiplier to increase to large values before cashing out.
+
+**High Rollers:**
+
+High bets are the name of the game for this group. They bet large sums of money in each game, although they tend to cash out at lower multipliers and thus play the game more conservatively, particularly compared to the Risk Takers. Interestingly, these users have also on average earned a net positive earnings from their games played.
+
+
+```{r, echo=F}
+
+# Assign cluster names to clusters 1 through 5 in order
+cluster_names <- c(
+    "Cautious Commoners",
+    "Risk Takers",
+    "Risky Commoners",
+    "High Rollers",
+    "Strategic Addicts"
+)
+
+# Append the cluster names to the cluster means table
+bustabit_clus_avg_named <- bustabit_clus_avg %>%
+    cbind(Name = cluster_names)
+
+# View the cluster means table with your appended cluster names
+bustabit_clus_avg_named
+
+```
+
