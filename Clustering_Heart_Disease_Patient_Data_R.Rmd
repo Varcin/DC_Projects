@@ -1,0 +1,245 @@
+---
+title: "Clustering Heart Disease Patient Data"
+author: "Bilsay Varcin"
+date: "April 1, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Targeting treatment for heart disease patients
+
+```{r echo=FALSE, out.width = '27%', out.extra='style="float:left; padding:10px"'}
+knitr::include_graphics("statics/heart_disease.jpeg")
+```
+
+There are many industries where understanding how things group together is beneficial. For example, retailers want to understand the similarities among their customers to direct advertisement campaigns, and botanists classify plants based on their shared similar characteristics. One way to group objects is to use clustering algorithms. We are going to explore the usefulness of unsupervised clustering algorithms to help doctors understand which treatments might work with their patients.
+
+We are going to cluster anonymized data of patients who have been diagnosed with heart disease. Patients with similar characteristics might respond to the same treatments, and doctors could benefit from learning about the treatment outcomes of patients like those they are treating. The data we are analyzing comes from the V.A. Medical Center in Long Beach, CA. To download the data, visit [here](https://archive.ics.uci.edu/ml/datasets/heart+Disease).
+
+Before running any analysis, it is essential to get an idea of what the data look like. The clustering algorithms we will use require numeric data-we'll check that all the data are numeric. In this project, you will be brushing up on your base R skills. Let's go!
+
+
+```{r Load Data, echo=F}
+# Load the data
+heart_disease <- read.csv("data/heart_disease_patients.csv")
+
+# Print the first ten rows
+head(heart_disease, 5)
+
+```
+
+
+## Quantifying patient differences
+
+It is important to conduct some exploratory data analysis (EDA) to familiarize ourselves with the data before clustering. EDA will help us learn more about the variables and make an informed decision about whether we should scale the data. Because k-means and hierarchical clustering measure similarity between points using a distance formula, it can place extra emphasis on certain variables that have a larger scale and thus larger differences between points.
+
+Exploratory data analysis helps us to understand the characteristics of the patients in the data. We need to get an idea of the value ranges of the variables and their distributions. This will also be helpful when we evaluate the clusters of patients from the algorithms. Are there more patients of one gender? What might an outlier look like?
+
+```{r Scale, echo=F}
+
+# Evidence that the data should be scaled?
+summary(heart_disease)
+
+# Remove id
+heart_disease <- heart_disease[ , !(names(heart_disease) %in% c("id"))]
+
+# Scaling data and saving as a data frame
+scaled <- scale(heart_disease)
+
+# What do the data look like now?
+summary(heart_disease)
+
+```
+
+
+## Let's start grouping patients
+
+Now that we have scaled the data, we can start the clustering process. For the k-means algorithm, it is necessary to select the number of clusters in advance.
+
+It is also important to make sure that our results are reproducible when conducting a statistical analysis. This means that when someone runs our code on the same data, they will get the same results. Because we are doing an analysis that has a random aspect, it is necessary to set a seed to ensure reproducibility.
+
+Reproducibility is especially important because doctors will potentially use our results to treat patients. It is vital that other analysts see where the groups come from and can verify the results.
+
+
+```{r kmeans, echo=F}
+
+# Set the seed so that results are reproducible
+seed_val  <- 10
+set.seed(seed_val)
+
+# Select a number of clusters
+k = 5
+
+# Run the k-means algorithm
+first_clust = kmeans(scaled, centers = k, nstart = 1)
+
+# How many patients are in each cluster?
+first_clust$size
+
+```
+
+
+## Another round of k-means
+
+Because the k-means algorithm initially selects the cluster centers by randomly selecting points, different iterations of the algorithm can result in different clusters. If the algorithm is genuinely grouping similar observations (as opposed to clustering noise), then cluster assignments will be somewhat robust between various iterations of the algorithm.
+
+With regards to the heart disease data, this would mean that the same patients would be grouped even when the algorithm is initialized at different random points. If patients are not in similar clusters with various algorithm runs, then the clustering method is not picking up on meaningful relationships between patients.
+
+We're going to explore how the patients are grouped with another iteration of the k-means algorithm. We will then be able to compare the resulting groups of patients.
+
+```{r kmeans2, echo=F}
+
+# Set the seed
+seed_val <- 38
+set.seed(seed_val)
+
+# Select a number of clusters and run the k-means algorithm
+k = 5
+second_clust = kmeans(scaled, centers = k, nstart=1)
+
+# How many patients are in each cluster?
+second_clust$size
+
+```
+
+
+## Comparing patient clusters
+
+It is important that the clusters are stable. Even though the algorithm begins by randomly initializing the cluster centers, if the k-means algorithm is the right choice for the data, then different initializations of the algorithm will result in similar clusters.
+
+The clusters from different iterations may not be the same, but the clusters should be roughly the same size and have similar distributions of variables. If there is a lot of change in clusters between different iterations of the algorithm, then k-means clustering is not the right choice for the data.
+
+It is not possible to validate that the clusters obtained from the algorithm are accurate because there is no patient labeling. Thus, it is necessary to examine how the clusters change between different iterations of the algorithm. We're going to use some visualizations to get an idea of the cluster stabilities. That way we can see how certain patient characteristics may have been used to group patients together.
+
+```{r}
+
+# Add cluster assignments to the data
+heart_disease["first_clust"] <- first_clust$cluster
+heart_disease["second_clust"] <- second_clust$cluster
+
+# Load ggplot2
+library(ggplot2)
+library(patchwork)
+
+# Create and print the plot of age and chol for the first clustering algorithm
+plot_one  <- ggplot(heart_disease, aes(x=age, y=chol, color = factor(first_clust))) + 
+   geom_point() + 
+  theme(legend.position = "bottom") +
+  labs(color = ("1st cluster"))
+
+# Create and print the plot of age and chol for the second clustering algorithm
+plot_two  <- ggplot(heart_disease, aes(x=age, y=chol, color = factor(second_clust))) + 
+   geom_point() + 
+  theme(legend.position = "bottom") +
+  labs(color = ("2nd cluster"))
+
+plots  <- (plot_one | plot_two) 
+plots
+
+```
+
+## Hierarchical clustering: another clustering approach
+
+An alternative to k-means clustering is hierarchical clustering. This method works well when data have a nested structure. Heart disease patient data might follow this type of structure. For example, if men are more likely to exhibit specific characteristics, those characteristics might be nested inside the gender variable. Hierarchical clustering also does not require the number of clusters to be selected before running the algorithm.
+
+Clusters can be selected by using the dendrogram. The dendrogram allows us to see how similar observations are to one another, and they are useful in helping us choose the number of clusters to group the data. It is now time for us to see how hierarchical clustering groups the data.
+
+```{r hierarchical clustering, echo=F}
+
+
+# Execute hierarchical clustering with complete linkage
+hier_clust_1 <- hclust(dist(scaled), method = "complete")
+
+# Print the dendrogram
+plot(hier_clust_1)
+
+# Get cluster assignments based on number of selected clusters
+hc_1_assign <- cutree(hier_clust_1, k = 5)
+
+```
+
+
+## Hierarchical clustering round two
+
+In hierarchical clustering, there are multiple ways to measure the dissimilarity between clusters of observations. Complete linkage records the largest dissimilarity between any two points in the two clusters being compared. On the other hand, single linkage is the smallest dissimilarity between any two points in the clusters. Different linkages will result in different clusters being formed.
+
+We want to explore different algorithms to group our heart disease patients. The best way to measure dissimilarity between patients could be to look at the smallest difference between patients and minimize that difference when grouping together clusters. It is always a good idea to explore different dissimilarity measures. Let's implement hierarchical clustering using a new linkage function.
+
+```{r hierarchical clustering2, echo=F}
+
+# Execute hierarchical clustering with single linkage
+hier_clust_2 <- hclust(dist(scaled), method="single")
+
+# Print the dendrogram
+plot(hier_clust_2)
+
+# Get cluster assignments based on number of selected clusters
+hc_2_assign <- cutree(hier_clust_2, k = 5)
+
+```
+
+## Comparing clustering results
+
+The doctors are interested in grouping similar patients together to determine appropriate treatments. Therefore, they want clusters with more than a few patients to see different treatment options. While a patient can be in a cluster by themselves, this means that the treatment they received might not be recommended for someone else in the group.
+
+Like the k-means algorithm, the way to evaluate hierarchical clusters is to investigate which patients are grouped together. Are there patterns evident in the cluster assignments, or do they seem to be groups of noise? We're going to examine the clusters resulting from the two hierarchical algorithms.
+
+```{r Clust Summary, echo=F}
+
+# Add assignment of chosen hierarchical linkage
+heart_disease$hc_clust <- hc_1_assign
+
+# Remove the sex, first_clust, and second_clust variables
+hd_simple <- heart_disease[, setdiff(names(heart_disease), c("sex", "first_clust", "second_clust"))]
+
+# Get the mean and standard deviation summary statistics
+clust_summary <- do.call(data.frame, aggregate(. ~ hc_clust, data = hd_simple, function(x) c(avg = mean(x), sd = sd(x))))
+clust_summary
+
+```
+
+## Visualizing the cluster contents
+
+In addition to looking at the distributions of variables in each of the hierarchical clustering runs, we will make visualizations to evaluate the algorithms. Even though the data has more than two dimensions, we can get an idea of how the data clusters by looking at a scatter plot of two variables. We want to look for patterns that appear in the data and see what patients get clustered together.
+
+
+```{r plot, echo = F}
+
+# Plot age and chol
+plot_one <- ggplot(heart_disease, aes(x=age,y=chol,color=as.factor(hc_clust))) +
+    geom_point() + 
+  theme(legend.position = "bottom") +
+  labs(color = ("1st cluster"))
+
+# Plot oldpeak and trestbps
+plot_two <- ggplot(heart_disease, aes(x=oldpeak, y=trestbps, color=as.factor(hc_clust))) +
+    geom_point() + 
+  theme(legend.position = "bottom") +
+  labs(color = ("2nd cluster"))
+
+plots  <- (plot_one | plot_two) 
+plots
+
+```
+
+
+## Conclusion
+
+Now that we've tried multiple clustering algorithms, it is necessary to determine if we think any of them will work for clustering our patients. For the k-means algorithm, similar clusters must be produced for each iteration of the algorithm to make sure that the algorithm clusters the signal, not the noise.
+
+For the sake of the doctors, we also want to have multiple patients in each group so they can compare treatments. We only did some preliminary work to explore the performance of the algorithms, and it is necessary to explore further before making a recommendation. Based on the above analysis, are there any algorithms that you would want to investigate further to group patients?
+
+Remember that it is important the k-mean algorithm seems stable when running multiple iterations. This means that we would see similar groups of patients showing up in the plots from the different iterations of the algorithm. For the hierarchical clustering, we need a method that puts a balanced number of patients in each group.
+
+```{r Conclusion}
+
+# Add TRUE if the algorithm shows promise, add FALSE if it does not
+explore_kmeans <- FALSE
+explore_hierarch_complete <- TRUE
+explore_hierarch_single <- FALSE
+
+```
+
