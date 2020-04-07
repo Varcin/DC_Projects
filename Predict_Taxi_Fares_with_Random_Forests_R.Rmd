@@ -1,0 +1,11 @@
+---
+title: "Predict Taxi Fares with Random Forests"
+author: "Bilsay Varcin"
+date: "April 3, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
