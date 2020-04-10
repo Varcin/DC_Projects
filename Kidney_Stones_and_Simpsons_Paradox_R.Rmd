@@ -1,0 +1,164 @@
+---
+title: "Kidney Stones and Simpson's Paradox"
+author: "Bilsay Varcin"
+date: "April 9, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## A new look at an old research study
+In 1986, a group of urologists in London published a research paper in The British Medical Journal that compared the effectiveness of two different methods to remove kidney stones. Treatment A was open surgery (invasive), and treatment B was percutaneous nephrolithotomy (less invasive). When they looked at the results from 700 patients, treatment B had a higher success rate. However, when they only looked at the subgroup of patients different kidney stone sizes, treatment A had a better success rate. What is going on here? This known statistical phenomenon is called Simpon's paradox. Simpon's paradox occurs when trends appear in subgroups but disappear or reverse when subgroups are combined.
+
+In this notebook, we are going to explore Simpon's paradox using multiple regression and other statistical tools. Let's dive in now!
+
+```{r echo=F, message=F}
+
+# Load the readr and dplyr packages
+library(dplyr)
+library(readr)
+library(kableExtra)
+
+# Read datasets kidney_stone_data.csv into data
+data <- read_csv("data/kidney_stone_data.csv")
+
+# Take a look at the first few rows of the dataset
+head(data) %>%
+  kable() %>%
+  kable_styling(position = "left", full_width = F) 
+
+```
+
+
+## Recreate the Treatment X Success summary table
+The data contains three columns: treatment (A or B), stone_size (large or small) and success (0 = Failure or 1 = Success). To start, we want to know which treatment had a higher success rate regardless of stone size. Let's create a table with the number of successes and frequency of success by each treatment using the tidyverse syntax.
+
+
+```{r frequency, echo=F}
+# Calculate the number and frequency of success and failure of each treatment 
+data %>% 
+  group_by(treatment, success) %>%
+  summarise(N = n()) %>% 
+  mutate(Freq = round(N/sum(N), 3)) %>%
+  kable() %>%
+  kable_styling(position="left", full_width = F)
+
+```
+
+
+## Bringing stone size into the picture
+From the treatment and success rate descriptive table, we saw that treatment B performed better on average compared to treatment A (82% vs. 78% success rate). Now, let's consider stone size and see what happens. We are going to stratify the data into small vs. large stone subcategories and compute the same success count and rate by treatment like we did in the previous task.
+
+The final table will be treatment X stone size X success.
+
+```{r, smallvslarge, echo=F}
+
+# Calculate number and frequency of success and failure by stone size for each treatment
+sum_data <- 
+  data %>% 
+  group_by(treatment, stone_size, success) %>%
+  summarise(N = n()) %>%
+  mutate(Freq = round(N/sum(N),3))
+
+# Print out the data frame we just created
+sum_data %>% kable() %>% kable_styling(position = "left", full_width = F)
+
+```
+
+
+## When in doubt, rely on a plot
+What is going on here? When stratified by stone size, treatment A had better results for both large and small stones compared to treatment B (i.e., 73% and 93% v.s. 69% and 87%). Sometimes a plot is a more efficient way to communicate hidden numerical information in the data. In this task, we are going to apply a plotting technique to reveal the hidden information.
+
+```{r barplot, echo=F}
+
+# Load ggplot2
+library(ggplot2)
+
+# Create a bar plot to show stone size count within each treatment
+size_bar <- sum_data %>%
+  ggplot(aes(x = treatment, y = N)) + 
+  geom_bar(aes(fill = stone_size), stat=  "identity") 
+
+size_bar
+```
+
+
+## Identify and confirm the lurking variable
+From the bar plot, we noticed an unbalanced distribution of kidney stone sizes in the two treatment options. Large kidney stone cases tended to be in treatment A, while small kidney stone cases tended to be in treatment B. Can we confirm this hypothesis with statistical testing?
+
+Let's analyze the association between stone size (i.e., case severity) and treatment assignment using a statistical test called Chi-squared. The Chi-squared test is appropriate to test associations between two categorical variables. This test result, together with the common knowledge that a more severe case would be more likely to fail regardless of treatment, will shed light on the root cause of the paradox.
+
+```{r ChisqSize, echo=F}
+
+# Load the broom package 
+library(broom)
+
+# Run a Chi-squared test
+trt_ss <- chisq.test(data$treatment, data$stone_size)
+
+# Print out the result in tidy format 
+tidy(trt_ss) %>% kable() %>% kable_styling(position = "left", full_width = F)
+
+```
+
+
+## Remove the confounding effect
+After the above exercises, we are confident that stone size/case severity is indeed the lurking variable (aka, confounding variable) in this study of kidney stone treatment and success rate. The good news is that there are ways to get rid of the effect of the lurking variable.
+
+Let's practice using multiple logistic regression to remove the unwanted effect of stone size, and then tidy the output with a function from the broom package.
+
+```{r logistic, echo=F}
+# Run a multiple logistic regression
+m <- glm(data = data, success ~  treatment + stone_size, family = "binomial")
+
+# Print out model coefficient table in tidy format
+tidy(m) %>% kable() %>% kable_styling(position = "left", full_width = F)
+
+```
+
+
+## Visualize model output
+We successfully fit a multiple logistic regression and pulled out the model coefficient estimates! Typically (and arbitrarily), P-values below 0.05 indicate statistical significance. Another way to examine whether a significant relationship exists or not is to look at the 95% confidence interval (CI) of the estimate. In our example, we are testing to see:
+
+1. if the effect of a small stone is the same as a big stone, and
+
+2. if treatment A is as effective as treatment B.
+
+If the 95% CI for the coefficient estimates cover zero, we cannot conclude that one is different from the other. Otherwise, there is a significant effect.
+
+
+```{r modeloutpiut, echo=F}
+
+# Save the tidy model output into an object
+tidy_m <- tidy(m)
+
+# Plot the coefficient estimates with 95% CI for each term in the model
+tidy_m %>%
+  ggplot(aes(x = term, y = estimate)) + 
+  geom_pointrange(aes(ymin = estimate - 1.96 * std.error, 
+                      ymax = estimate + 1.96 * std.error)) +
+  geom_hline(yintercept = 0)
+
+
+```
+
+
+## Generate insights
+Based on the coefficient estimate plot and the model output table, there is enough information to generate insights about the study. Is treatment A superior to B after taking into account the effect of stone size/severity level?
+
+Everything is in the output table from the regression model. Recall, a coefficient represents the effect size of the specific model term. A positive coefficient means that the term is positively related to the outcome. For categorical predictors, the coefficient is the effect on the outcome relative to the reference category. In our study, stone size large and treatment A are the reference categories.
+
+```{r result}
+
+# Is small stone more likely to be a success after controlling for treatment option effect?
+# Options: Yes, No (as string)
+small_high_success <- "Yes"
+
+# Is treatment A significantly better than B?
+# Options: Yes, No (as string)
+A_B_sig <- "No"
+
+```
+
