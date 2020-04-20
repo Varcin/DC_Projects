@@ -1,0 +1,265 @@
+---
+title: "Trends in Maryland Crime Rates"
+author: "Bilsay Varcin"
+date: "April 13, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Maryland crime data
+Crime rates vary across space and time. The reasons crimes are committed in some places but not others can be difficult to detect because of complex socio-economic factors, but policymakers still need to understand how crime rates are changing from place to place and from time to time to inform their policies.
+
+Many government statistics, such as crime rates, come from nested datasets. Most US States are divided into counties (Alaska has "burrows," and Louisiana has "parishes"), and counties and county-level governments can vary within the same state. For example, one county might have a high population density and be urban, whereas a second county might have a low population density and be rural.
+
+In this project we will use a form of regression called hierarchical modeling to capture and explore crime statistics collected by the State of Maryland to see if there is a linear trend in violent crime across the state between 1975 and 2016. These data come from the Maryland Statistical Analysis Center.
+
+This figure shows population per county across the state of Maryland in 2016. By the end of the project, we will create a similar figure for each county's crime rate.
+
+
+```{r Maryland Figure, echo=F, out.width='100%', fig.align='center'}
+knitr::include_graphics("statics/countyPop.jpg")
+
+```
+
+
+Before running a regression analysis, we often need to tidy data. Everyday tidying tasks include renaming and reformatting columns.
+
+```{r Load Data, echo=F, include=F, message=F}
+
+# Load the packages
+library(tidyverse)
+library(lubridate)
+library(kableExtra)
+
+# Read in the crime data
+crime_raw <- read_csv("data/Violent_Crime_by_County_1975_to_2016.csv")
+
+# Select and mutate columns the needed columns
+crime_use <- crime_raw %>% 
+    select(JURISDICTION, YEAR, POPULATION, crime_rate = `VIOLENT CRIME RATE PER 100,000 PEOPLE`) %>%
+    mutate(YEAR_2 = year(mdy_hms(YEAR)))
+
+# Peek at the data
+head(crime_use)
+
+```
+
+
+
+## Raw data and trend lines
+Before running a regression or building a model, it's a good idea to explore the data. Exploratory data analysis (EDA) will help us see outliers, possible data errors, or trends. There is no single coding technique for EDA, but plotting the data is a great first step. A picture (or well-designed figure) can be worth a thousand summary statistics!
+
+Let's plot the crime rate over time for each county and add a linear trend line.
+
+```{r Plot1, echo=F}
+
+# Plot the data as lines and linear trend lines
+ggplot(crime_use, aes(x = YEAR_2, y = crime_rate, group = JURISDICTION)) + 
+    geom_line() + 
+    geom_smooth(method = "lm", se = FALSE, size = 0.5)
+
+```
+
+## Re-scale the data
+Prior to building a linear mixed-effects regression model, we need to re-scale the YEAR_2 variable. In the raw data, YEAR_2 starts at 1976, but regression models work best when the intercept is near zero. If we try to use YEAR_2 without re-scaling it, the model will fail to converge.
+
+We'll create a new variable, YEAR_3 that starts at zero instead of 1976.
+
+
+```{r Scale Year, echo=F}
+
+# Mutate data to create another year column, YEAR_3
+crime_use <- crime_use %>%
+  mutate(YEAR_3 = YEAR_2 - min(YEAR_2)) 
+
+```
+
+## Build a LMER
+Now we can build a hierarchical model, also known as a linear mixed-effects regression model, using lmer(). lmer() uses syntax similar to lm(), but it requires a random-effect argument. For example, y predicted by fixed-effect slope, x , and random-effect intercept, group , would be y ~ x + (1|group). x can also be included as a random-effect slope: y ~ x + (x|group). Hierarchical and Mixed Effect Models covers these models in greater detail.
+
+We are going to see if a linear trend through time can predict violent crime rates. We will estimate the crime trend for the entire state (a fixed-effect slope) and trends for each county (random-effect slopes). By treating each county as a random-effect, we assume the trend for each county comes from a state-wide distribution.
+
+We'll use the lmerTest package because it adds p-values for fixed-effect coefficients to lmer() models, something the lme4 package does not include for reasons listed on the project's FAQ page.
+
+
+```{r LMER, echo=F, message=F, include=F}
+
+# load the lmerTest package
+library(lmerTest)
+
+# Using crime_use data, build a lmer() with crime_rate predicted by YEAR_3 as a fixed-effect slope, and YEAR_3 as a random-effect slope with JURISDICTION as a random-effect intercept. Save this as lmer_crime
+# Build a lmer and save it as lmer_crime
+lmer_crime <- lmer(crime_rate ~ YEAR_3 + (YEAR_3|JURISDICTION), data=crime_use)
+
+# Print the model output
+lmer_crime
+
+```
+
+
+## Model outputs
+Let's examine the model's output. lmer() outputs are similar to lm() outputs, but lmer() outputs include extra information about both fixed- and random-effects. The Hierarchical and Mixed-effects Models course provides more information on lmer() summary outputs.
+
+The fixed-effect trend for YEAR_3 is not significantly different from zero, but what do the estimates look like for different counties? We can access the regression coefficients using fixef() and ranef().
+
+```{r Results, echo=F, message= F}
+
+# Examine the model outputs using summary
+summary(lmer_crime)
+
+# This is for readability 
+noquote("**** Fixed-effects ****")
+
+# Use fixef() to view fixed-effects
+fixef(lmer_crime)["YEAR_3"]
+
+# This is for readability 
+noquote("**** Random-effects ****")
+
+# Use ranef() to view random-effects
+ranef(lmer_crime)$JURISDICTION[, "YEAR_3"]
+
+```
+
+
+## Format model coefficients
+We estimated the crime rate for the entire state as a fixed-effect - this is the average crime rate across all of Maryland. We also estimated the crime rate for each county as a random-effect. To get the specific random-effect slope estimated for each county, we need to calucalate the difference between the county crime rate and the state average crime rate. For example, Allegany County had a slope estimate of 6.4 and Maryland had a slope estimate of -1.4. Adding these together, we get an estimated slope of 5.0 (6.4 + -1.4 = 5.0) for Allegany County.
+
+We can use R to calculate the slope estimate for each county by extracting the fixed-effect estimate and adding it to the random-effect estimates.
+
+
+```{r fixed effects, echo=F}
+
+# Add the fixed-effect to the random-effect and save as county_slopes
+county_slopes <- fixef(lmer_crime)["YEAR_3"] + ranef(lmer_crime)$JURISDICTION["YEAR_3"]
+
+
+# Add a new column with county names
+county_slopes <-
+    county_slopes %>% 
+    rownames_to_column("county")
+
+```
+
+
+## Maryland map data
+We now have the crime trend data ready, but we need to get map data for the plot.
+
+Let's use the usmap package to get map data for the US. usmap data are already data frames, whereas the older maps package requires some wrangling to use with ggplot2.
+
+```{r usmap, echo=F}
+
+# Load usmap package
+library(usmap) 
+
+# load and filter map data
+county_map <- us_map(regions = "counties", include = "MD")
+
+```
+
+
+
+## Matching county names
+To plot the data, we need to merge the crime data (supplied by the State of Maryland) and the map data (provided in the usmap package), but first, we need to make sure county names are the same in both datasets. In this case, we are lucky - there is only one small difference.
+
+```{r Baltimore, echo=F, include=F}
+
+# See which counties are not in both datasets
+county_slopes %>% anti_join(county_map, by = "county")
+county_map %>% anti_join(county_slopes, by = "county")
+
+# Rename crime_names county
+county_slopes  <- county_slopes  %>% 
+  mutate(county = ifelse(county == "Baltimore City", "Baltimore city", county))
+
+```
+
+
+## Merging data frames
+Finally, both data frames have the same county names. Now we can merge them!
+
+```{r both data, echo=F, message=F}
+
+# Merge the map and slope data frames
+both_data <- 
+    county_map %>% full_join(county_slopes)
+
+# Peek at the data
+head(both_data) %>%
+  kable() %>% kable_styling(position = "left", full_width = F)
+
+```
+
+## Mapping trends
+Woohoo! We're ready to plot!
+
+After creating the plot, see if any patterns emerge.
+
+
+```{r ggmap, echo=F}
+
+# Set the notebook's plot settings
+options(repr.plot.width=10, repr.plot.height=5)
+
+# Plot the results 
+crime_map <- 
+   ggplot(both_data, aes(x = x, y = y, group=county, fill=YEAR_3)) +
+  geom_polygon() + 
+  scale_fill_continuous(name = expression(atop("Change in crime rate","(Number year"^-1*")")),
+                        low = "skyblue", high = "gold")
+
+# Look at the map
+crime_map
+
+```
+
+## Polish the map
+We are almost done. Our map shows how linear trends in crime rates varied between 1976 and 2016, but we do not have a polished figure yet.
+
+Let's clean up our plot so that we can present it policymakers.
+
+```{r clean map, echo=F}
+
+# Plot options
+options(repr.plot.width=10, repr.plot.height=5)
+
+# Polish figure
+crime_map_final <- crime_map + 
+  theme_minimal() +
+  xlab("") +
+  ylab("") +
+  theme(axis.line = element_blank(),
+       axis.text = element_blank(),
+       panel.grid.major = element_blank(),
+       panel.grid.minor = element_blank(),
+       panel.border = element_blank(),
+       panel.background = element_blank())
+
+# Look at the map
+crime_map_final
+```
+
+## Compare populations and crime rates
+
+Statewide, we found no linear trend in crime rates across Maryland. But, trends in crime rates varied across the state. What should we tell a policymaker? We could say, Location is key. Crime increased in some locations but it also decreased in others.
+
+Our analysis raises other question; comparing the population figure to the crime trends figure, we see that population might affect crime rate trends. Could other explanatory variables better explain a county's crime rate? We could look for more explanatory variables in public data sources such those supplied by the State of Maryland, the US Federal Government at Data.gov, and the US Census Bureau.
+
+Also, our figure suggests a nonlinear trend in some counties. We could either use a nonlinear model or only model the crime rate for the past 10 or 20 years. Nonlinear modeling in R with GAMS covers some nonlinear models. Additionally, we could build our own, more complicated regression using a language such as JAGS, covered in Bayesian Modeling with RJAGS. The last model approach would allow us to calculate credible intervals around the random-effects.
+
+To finish up, we'll quickly look to see if the population by county affects the crime rate.
+
+```{r lmer2, echo=F, message=F}
+
+# Build a lmer with both year and population
+lmer_pop <- lmer(crime_rate ~ YEAR_3 + POPULATION + (YEAR_3|JURISDICTION), data = crime_use)
+
+# Inspect the results
+summary(lmer_pop)
+ranef(lmer_pop)
+
+```
+
