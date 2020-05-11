@@ -1,0 +1,180 @@
+---
+title: "Explore 538' Halloween Candy Rankings"
+author: "Bilsay Varcin"
+date: "5/11/2020"
+output: html_document
+---
+
+
+Every year around Halloween it seems like everyone has candy on the brain! There's a great dataset from [FiveThirtyEight](https://fivethirtyeight.com/) that includes all sorts of different information about different kinds of candy. For example, is a candy chocolaty? Does it have nougat? How does its cost compare to other candies? How many people prefer one candy over another?
+
+We'll take a whirlwind tour of this dataset and wrap up by trying linear and logistic regression techniques out on it!
+
+First things first, let's get our packages and data loaded up and inspect the data to see exactly what we're dealing with.
+
+
+```{r echo=F, message=F}
+
+# Load all the packages
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(corrplot)
+library(fivethirtyeight)
+
+# Load the candy_rankings dataset from the fivethirtyeight package
+data(candy_rankings)
+
+# Take a glimpse() at the dataset
+glimpse(candy_rankings)
+
+```
+
+
+## Explore the distributions of categorical variables
+Let's get started by looking at the distributions of each binary categorical variable. There are quite a few of them - we'll have to do some data wrangling to get them in shape for plotting.
+
+We can get a sense of the proportion of TRUEs and FALSEs in each column by using the gather() function to get the dataset in long format. Then we can make a bar chart showing the number of TRUEs and FALSEs for each type of candy (feature).
+
+```{r, echo=F, message=F}
+
+# Gather the categorical variables to make them easier to plot
+candy_rankings_long <- candy_rankings %>%
+    gather(key = "feature", value = "value", -competitorname, -sugarpercent, -pricepercent, -winpercent)
+
+# Make a bar plot showing the distribution of each variable
+ggplot(candy_rankings_long, aes(x = value)) +
+    geom_bar() +
+    facet_wrap(~feature)
+```
+
+
+## Taking a look at pricepercent
+Next, we'll look at the pricepercent variable. This variable records the percentile rank of the candy's price against all the other candies in the dataset. Let's see which is the most expensive and which is the least expensive by making a lollipop chart. One of the most interesting aspects of this chart is that a lot of the candies share the same ranking, so it looks like quite a few of them are the same price.
+
+
+```{r echo=F}
+
+# Make a lollipop chart of pricepercent
+ggplot(candy_rankings, aes(reorder(competitorname, pricepercent), pricepercent)) +
+    geom_segment(aes(xend = reorder(competitorname, pricepercent), yend = 0)) +
+    geom_point() +
+    coord_flip()
+
+
+```
+
+## Exploring winpercent (part i)
+Moving on, we'll take a look at another numerical variable in the dataset: winpercent. This variable is the percentage of people who prefer this candy over another randomly chosen candy from the dataset.
+
+We'll start with a histogram! The distribution of rankings looks symmetrical and seems to center on about 45%!
+
+```{r echo = F, message=F}
+
+# Plot a histogram of winpercent
+ggplot(candy_rankings, aes(winpercent)) +
+    geom_histogram()
+
+```
+
+
+## Exploring winpercent (part ii)
+Now that we've looked at the histogram, let's make another lollipop chart to visualize the rankings. It looks like Reese's Peanut Butter Cups are the all time favorite out of this set of candies!
+
+```{r echo = F}
+
+# Make a lollipop chart of winpercent
+ggplot(candy_rankings, aes(reorder(competitorname, winpercent), winpercent)) +
+    geom_segment(aes(xend = reorder(competitorname, winpercent), yend=0)) +
+    geom_point() +
+    coord_flip()
+
+```
+
+
+## Exploring the correlation structure
+Now that we've explored the dataset one variable at a time, we'll see how the variables interact with one another. This is important as we get ready to model the data because it will give us some intuition about which variables might be useful as explanatory variables.
+
+We'll use the corrplot package to plot a correlation matrix. Taking a look at this plot, it looks like chocolaty candies are almost never fruity. I can certainly see why that's the case! This also allows us to check for possible multicollinearity, which can be a problem for regression modeling. It looks like we're good though!
+
+
+```{r correlation matrix, echo=F}
+
+# Plot the correlation matrix
+candy_rankings %>% select(-competitorname) %>% cor() %>% corrplot()
+
+```
+
+
+## Fitting a linear model of winpercent
+Let's dive into the deep end of modeling by creating a linear model of winpercent using all the other variables except competitorname.
+
+Because competitorname is a categorical variable with a unique value in every row, it is mathematically impossible to fit a linear model if it is included. Moreover, this variable doesn't add any information that the model could use because the names do not relate to any of the candies' attributes.
+
+Let's fit the model! Then we can dive into exploring it. Maybe this will give us an idea of why people tend to prefer one candy over another!
+
+```{r}
+
+# Fit a linear model of winpercent explained by all variables 
+# except competitorname
+win_mod <- lm(winpercent ~ . -competitorname, data = candy_rankings)
+
+```
+
+## Evaluating the linear model
+Let's see how we did! We'll take a look at the results of our linear model and run some basic diagnostics to make sure the output is reliable.
+
+Taking a look at the coefficients, we can make some conclusions about the factors that cause people to choose one candy over another. For example, it looks like people who took this survey really like peanut butter! There are a few other significant coefficients. Which ones are these?
+
+
+```{r lm, echo = F, message=F}
+
+# Take a look at the summary
+summary(win_mod)
+
+# Plot the residuals vs the fitted values
+ggplot(augment(win_mod), aes(.fitted, .resid)) +
+    geom_point() +
+    geom_hline(yintercept = 0)
+
+```
+
+
+## Fit a logistic regression model of chocolate
+Now let's try out logistic regression! We'll be trying to predict if a candy is chocolaty or not based on all the other features in the dataset.
+
+A logistic regression is a great choice for this particular modeling task because the variable we're trying to predict is either TRUE or FALSE. The logistic regression model will output a probability that we can use to make our decision.
+
+This model outputs a warning because a few of the features (like crispedricewafer) are only ever true when a candy is chocolate. This means that we cannot draw conclusions from the coefficients, but we can still use the model to make predictions!
+
+```{r binomial, message=F, warning=F}
+
+# Fit a glm() of chocolate
+choc_mod <- glm(chocolate ~ . -competitorname, data=candy_rankings, family = binomial())
+
+```
+
+## Evaluate the logistic regression model
+Let's take our logistic regression model out for a spin! We'll start by creating a data frame of predictions we can compare to the actual values. Then we'll evaluate the model by making a confusion matrix and calculating the accuracy.
+
+Looking at the summary, it looks like most of the coefficients aren't statistically significant. In this case, that's okay because we're not trying to draw any conclusions about the relationships between the predictor variables and the response. We're only trying to make accurate predictions and, taking a look at our confusion matrix, it seems like we did a pretty good job!
+
+```{r predict, message=F}
+
+# Print the summary
+summary(choc_mod)
+
+# Make a data frame of predictions
+preds <- augment(choc_mod, type.predict = "response") %>% mutate(prediction = .fitted > 0.5)
+
+# Create the confusion matrix
+conf_mat <- table(preds$chocolate, preds$prediction)
+
+# Calculate the accuracy
+accuracy <- (conf_mat[1,1] + conf_mat[2,2]) / sum(conf_mat)
+accuracy
+
+```
+
+
