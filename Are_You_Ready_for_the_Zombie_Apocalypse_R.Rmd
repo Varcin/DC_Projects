@@ -1,0 +1,300 @@
+---
+title: "Are You Ready for the Zombie Apocalypse"
+author: "Bilsay Varcin"
+date: "5/11/2020"
+output: 
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## ZOMBIES!
+News reports suggest that the impossible has become possible...zombies have appeared on the streets of the US! What should we do? The Centers for Disease Control and Prevention (CDC) [zombie preparedness website](https://www.cdc.gov/cpr/zombie/index.htm) recommends storing water, food, medication, tools, sanitation items, clothing, essential documents, and first aid supplies. Thankfully, we are CDC analysts and are prepared, but it may be too late for others!
+
+Our team decides to identify supplies that protect people and coordinate supply distribution. A few brave data collectors volunteer to check on 200 randomly selected adults who were alive before the zombies. We have recent data for the 200 on age and sex, how many are in their household, and their rural, suburban, or urban location. Our heroic volunteers visit each home and record zombie status and preparedness. Now it's our job to figure out which supplies are associated with safety!
+
+
+```{r echo=F, out.width= '70%' , fig.align='center'}
+knitr::include_graphics("statics/zombie-wide.jpg")
+```
+
+```{r echo =F, message=F}
+library(kableExtra)
+
+# Read in the data
+zombies <- read.csv("data/zombies.csv")
+
+# Examine the data with summary()
+# summary(zombies) %>% kable() %>% kable_styling(full_width = F, position = "left")
+
+# Create water-per-person
+zombies$water.person <- zombies$water / zombies$household
+
+# Examine the new variable 
+# summary(zombies$water.person)
+#psych::describe(zombies)
+#Hmisc::describe(zombies)
+# DescTools::Desc(zombies)
+skimr::skim(zombies)
+# 
+# skimr::sfl(skim_type = "numeric", n_unique)
+#knitr::knit_print(skimr::skim(zombies))
+
+```
+
+## Compare zombies and humans
+Because every moment counts when dealing with life and (un)death, we want to get this right! The first task is to compare humans and zombies to identify differences in supplies. We review the data and find the following:
+
+
+* zombieid: unique identifier
+
+* zombie: human or zombie
+
+* age: age in years
+
+* sex: male or female
+
+* rurality: rural, suburban, or urban
+
+* household: number of people living in household
+
+* water: gallons of clean water available
+
+* food: food or no food
+
+* medication: medication or no medication
+
+* tools: tools or no tools
+
+* firstaid: first aid or no first aid
+
+* sanitation: sanitation or no sanitation
+
+* clothing: clothing or no clothing
+
+* documents: documents or no documents
+
+
+```{r message=F, warning=F}
+
+# Load ggplot2 and gridExtra
+library(ggplot2) 
+library(gridExtra)
+
+# Create the ageZombies graph
+ageZombies <- ggplot(data = zombies, aes(x = age, fill = zombie)) +
+  geom_density(alpha = 0.3) +  
+  theme_minimal() +
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# Create the waterPersonZom graph
+waterPersonZom <- ggplot(data = zombies, aes(x = water.person, fill = zombie)) +
+  geom_density(alpha = 0.3) +  
+  theme_minimal() +
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# Display plots side by side
+grid.arrange(ageZombies, waterPersonZom, ncol = 2)
+
+```
+
+## Compare zombies and humans (part 2)
+It looks like those who turned into zombies were older and had less available clean water. This suggests that getting water to the remaining humans might help protect them from the zombie hoards! Protecting older citizens is important, so we need to think about the best ways to reach this group. What are the other characteristics and supplies that differ between humans and zombies? Do zombies live in urban areas? Or are they more common in rural areas? Is water critical to staying human? Is food critical to staying human?
+
+```{r}
+
+# Make a subset of the zombies data with only factors
+zombies.factors <- zombies[ , sapply(zombies, is.factor)]
+
+#n prop.table() use margin = 1 for row percents and margin = 2 for column percents.
+# Write a function to get percent zombies
+perc.zombies <- lapply(zombies.factors, 
+                       function(x){ 
+                           return(prop.table(table(x, zombies.factors$zombie),
+                                             margin = 1))
+                           })
+# Print the data
+perc.zombies
+
+```
+
+## Recode variables missing values
+Hmm...it seems a little fishy that the clothing and documents variables have only one category in prop.table(). After checking with the data collectors, they told you that they recorded those without clothing or documents as missing values or NA rather than No clothing or No documents.
+
+To make sure the analyses are consistent and useful, the analysis team leader decides we should recode the NA values to No clothing and No documents for these two variables.
+
+```{r}
+
+# Add new level and recode NA to "No clothing"
+levels(zombies$clothing) <- c(levels(zombies$clothing), "No clothing")
+zombies$clothing[is.na(zombies$clothing)] <- "No clothing"
+
+# Add new level and recode NA to "No documents"
+levels(zombies$documents) <- c(levels(zombies$documents), "No documents")
+zombies$documents[is.na(zombies$documents )] <- "No documents"
+
+# Check recoding
+summary(zombies)
+
+```
+
+## Selecting variables to predict zombie status
+From Task 3, it appears that 70.4% of people in urban areas are zombies, while just 18.4% of those in rural areas are zombies. Getting humans out of cities and protecting those who cannot leave seems important!
+
+For most of the supplies, there is less of a difference between humans and zombies, so it is difficult to decide what else to do. Since there is just one chance to get it right and every minute counts, the analysis team decides to conduct bivariate statistical tests to gain a better understanding of which differences in percents are statistically significantly associated with being a human or a zombie.
+
+```{r}
+
+# Update subset of factors
+zombies.factors <- zombies[ , sapply(zombies, is.factor)]
+
+# Chi-squared for factors
+chi.zombies <- lapply(zombies.factors, 
+                       function(x){
+                           return(chisq.test(x, zombies.factors$zombie))
+                           })
+
+# T-tests for numeric
+ttest.age <- t.test(zombies$age ~ zombies$zombie)
+ttest.water <- t.test(zombies$water.person ~ zombies$zombie)    
+
+# Examine the results
+chi.zombies 
+ttest.age 
+ttest.water
+
+```
+
+## Build the model
+Now we are getting somewhere! Rurality, food, medication, sanitation, age, and water per person have statistically significant relationships to zombie status. We use this information to coordinate the delivery of food and medication while we continue to examine the data!
+
+The next step is to estimate a logistic regression model with zombie as the outcome. The generalized linear model command, glm(), can be used to determine whether and how each variable, and the set of variables together, contribute to predicting zombie status. Following glm(), [odds.n.ends()](https://www.rdocumentation.org/packages/odds.n.ends/versions/0.1.0/topics/odds.n.ends) computes model significance, fit, and odds ratios.
+
+```{r message=F}
+
+# Create zombie model
+zombie.model <- glm(zombie ~ age + water.person + food + rurality + medication + sanitation,
+                   data = zombies, family = binomial(logit))
+
+# Model significance, fit, and odds ratios with 95% CI
+library(odds.n.ends)
+zombie.model.fit <- odds.n.ends(zombie.model)
+
+# Print the results of the odds.n.ends command
+zombie.model.fit
+
+```
+
+
+
+## Checking model assumptions
+The model is statistically significant (c2 = 145.6; p < 0.05), indicating that the variables in the model work together to help explain zombie status. Older age, having no food, living in suburban or urban areas (compared to rural), and having no access to medication increased the odds of being a zombie. Access to sanitation and having enough water decreased the odds of being a zombie. The model correctly predicted the zombie status of 63 zombies and 109 humans, or 172 of the 200 participants. Before relying on the model, check model assumptions: no multicollinearity and linearity.
+
+Checking multicollinearity:
+We can use the generalized variance inflation factor (GVIF) to check for multicollinearity. The GVIF determines to what extent each independent variable can be explained by the rest of the independent variables. When an independent variable is well-explained by the other independent variables, the GVIF is high, indicating that the variable is redundant and should be dropped from the model. Values greater than two are often used to indicate a failed multicollinearity assumption.
+
+$$GVIF^{(1/(2df))} < 2$$
+$$df = degrees of freedom$$
+
+Checking linearity:
+Linearity can be checked by graphing the log-odds of the outcome against each numeric predictor to see if the relationship is linear.
+
+```{r echo=F, fig.align="center", out.width='50%'}
+knitr::include_graphics("statics/test-assumptions-zombie.jpg")
+```
+
+
+For linearity assumption checking, scatter plots will show two lines, a straight regression line and a curvy Loess curve, which captures more subtle localized detail. If the Loess curve is close to being straight, the relationship between x and y is linear. If it deviates a lot from being straight, the relationship is not linear. [vif()](http://math.furman.edu/~dcs/courses/math47/R/library/car/html/vif.html)
+
+```{r message=F}
+
+# Compute GVIF 
+library(car)
+vif(zombie.model)
+
+# Make a variable of the logit of the outcome
+zombies$logitZombie <- log(zombie.model$fitted.values/(1-zombie.model$fitted.values))
+
+# Graph the logit variable against age and water.person
+ageLinearity <- ggplot(data = zombies, aes(x = age, y = logitZombie))+
+  geom_point(color = "gray") +
+  geom_smooth(method = "loess", se = FALSE, color = "orange") + 
+  geom_smooth(method = "lm", se = FALSE, color = "gray") + 
+  theme_bw() 
+
+waterPersonLin <- ggplot(data = zombies, aes(x = water.person, y = logitZombie))+
+  geom_point(color = "gray") +
+  geom_smooth(method = "loess", se = FALSE, color = "orange") + 
+  geom_smooth(method = "lm", se = FALSE, color = "gray") + 
+  theme_bw() 
+
+# View both plots side-by-side
+grid.arrange(ageLinearity, waterPersonLin, ncol = 2)
+
+```
+
+## Interpreting assumptions and making predictions
+We find that the GVIF scores are low, indicating the model meets the assumption of no perfect multicollinearity. The plots show relatively minor deviation from the linearity assumption for age and water.person. The assumptions appear to be sufficiently met.
+
+One of your friends on the analysis team hasn't been able to reach her dad or brother for hours, but she knows that they have food, medicine, and sanitation from an earlier phone conversation. Her 71-year-old dad lives alone in a suburban area and is excellent at preparedness; he has about five gallons of water. Her 40-year-old brother lives in an urban area and estimated three gallons of water per person. She decides to use the model to compute the probability they are zombies.
+
+```{r}
+
+# Make a new data frame with the relatives data in it 
+newdata <- data.frame(age = c(71, 40), 
+                      water.person = c(5, 3),
+                      food = c("Food", "Food"),
+                      rurality = c("Suburban", "Urban"),
+                      medication = c("Medication", "Medication"),
+                      sanitation = c("Sanitation", "Sanitation"))
+
+# Use the new data frame to predict 
+predictions <- predict(zombie.model, newdata, type = "response")
+
+# Print the predicted probabilities
+predictions
+
+```
+
+
+## What is your zombie probability?
+Her dad has about a 15.5 percent chance of being a zombie and her brother has less than a 10 percent chance. It looks like they are probably safe, which is a big relief! She comes back to the team to start working on a plan to distribute food and common types of medication to keep others safe. The team discusses what it would take to start evacuating urban areas to get people to rural parts of the country where there is a lower percent of zombies. While the team is working on these plans, one thought keeps distracting you...your family may be safe, but how safe are you?
+
+Add your own real-life data to the newdata data frame and predict your own probability of becoming a zombie!
+
+```{r echo=F}
+
+# Add your data to the newdata data frame
+newdata <- data.frame(age = c(71, 40, 30), 
+                      water.person = c(5, 3, 2),
+                      food = c("Food", "Food", "Food"),
+                      rurality = c("Suburban", "Urban", "Urban"),
+                      medication = c("Medication", "Medication", "No medication"),
+                      sanitation = c("Sanitation", "Sanitation", "Sanitation"))
+
+# Use the new data frame to predict 
+predictions <- predict(zombie.model, newdata, type = "response")
+
+# Print the predictions
+predictions
+
+```
+
+
+
+## Are you ready for the zombie apocalypse?
+While it is unlikely to be a zombie apocalypse will happen in the near future, the information presented in this notebook draws on emergency preparedness recommendations from the CDC. Although there is no way to make ourselves younger, we can have food, water, medication, and other supplies ready to ensure we are safe in the event of a blizzard, flood, tornado, or another emergency. After computing your zombie probability, think about what you could personally do to increase the likelihood that you will stay safe in the next storm or zombie apocalypse.
+
+```{r}
+
+# What is your probability of becoming a zombie?
+me <- 25.9
+
+# How prepared are you for a real emergency?
+preparedness_level  <- "Okay, but I should probably pick up a few emergency items at the store"
+
+```
+
