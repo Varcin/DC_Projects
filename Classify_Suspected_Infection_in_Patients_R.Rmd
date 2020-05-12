@@ -1,0 +1,248 @@
+---
+title: "Classify Suspected Infection in Patients"
+author: "Bilsay Varcin"
+date: "5/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## This patient may have sepsis
+Sepsis is a deadly syndrome where a patient has a severe infection that causes organ failure. The sooner septic patients are treated, the more likely they are to survive, but sepsis can be challenging to recognize. It may be possible to use hospital data to develop machine learning models that could flag patients who are likely to be septic. However, before we develop predictive algorithms, we need a reliable method to determine patients who are septic. One component of sepsis is a severe infection.
+
+In this project, we will use two weeks of hospital electronic health record (EHR) data to find out which patients had a severe infection according to four criteria. We will look into the data to see if a doctor ordered a blood test to look for bacteria (a blood culture) and gave the patient a series of intervenous antibiotics.
+
+```{r, echo = F, message=F}
+# Load packages
+library(data.table)
+library(kableExtra)
+
+# Read in the data
+antibioticDT <- fread("data/antibioticDT.csv")
+
+# Look at the first 30 rows
+head(antibioticDT, 10) %>% kable() %>% kable_styling(full_width = F, position = "left")
+
+```
+
+## Which antibiotics are "new"?
+These data represent all drugs administered in a hospital over two weeks. Each row represents one time a patient was given an antibiotic. The variables include the patient identification number, the day the drug was administered, the name of the antibiotic, and how it was administered. For example, patient "8" received doxycycline by mouth on the first day of their stay.
+
+We will identify patients with a serious infection using the following criteria.
+
+**Criteria for Suspected Infection**
+
+1. The patient receives antibiotics for a sequence of four days, with gaps of one day allowed.
+
+2. The sequence must start with a new antibiotic, defined as an antibiotic type that was not given in the previous two days.
+
+3. The sequence must start within two days of a blood culture.
+
+4. There must be at least one intervenous (I.V.) antibiotic within the +/-2 day window.
+
+Let's start with the second item by finding which rows represent "new antibiotics". We will determine if each antibiotic was given to the patient in the prior two days. We'll visualize this task by looking at the data sorted by id, antibiotic type, and day.
+
+```{r, echo=F, message=F}
+
+# Sort the data and examine the first 40 rows
+setorder(antibioticDT, patient_id, antibiotic_type, day_given)
+
+# Use shift to calculate the last day a particular drug was administered
+antibioticDT[ , last_administration_day := shift(day_given, type="lag"), 
+  by = .(patient_id, antibiotic_type)]
+
+# Calculate the number of days since the drug was last administered
+antibioticDT[ , days_since_last_admin := day_given - last_administration_day]
+
+# Create antibiotic_new with an initial value of one, then reset it to zero as needed
+antibioticDT[ , antibiotic_new := 1]
+antibioticDT[days_since_last_admin <= 2 & is.na(days_since_last_admin) == F , antibiotic_new := 0]
+
+```
+
+
+## Looking at the blood culture data
+Now let's look at blood culture data from the same two-week period in this hospital. These data are in blood_cultureDT.csv. Let's start by reading it into the workspace and having a look at a few rows.
+
+Each row represents one blood culture and gives the patient's id and the day the blood culture test occurred. For example, patient "8" had a blood culture on the second day of their hospitalization and again on the thirteenth day. Notice that some patients from the antibiotic dataset are not in this dataset and vice versa. Some patients are in neither because they received neither antibiotics nor a blood culture.
+
+```{r echo=F}
+
+# Read in blood_cultureDT.csv
+blood_cultureDT <- fread("data/blood_cultureDT.csv")
+
+# Print the first 30 rows
+head(blood_cultureDT) %>% kable() %>% kable_styling(full_width = F, position = "left")
+
+```
+
+
+## Combine the antibiotic data and the blood culture data
+To find which antibiotics were given close to a blood culture test, we need to combine the drug administration data with the blood culture data. We'll keep only patients that are still candidates for infection—only those in both data sets.
+
+A challenge with the data is that some patients had blood cultures on several different days. For each of those days, we will see if there is a sequence of antibiotic days close to them. To accomplish this, in the merge we will match each blood culture to each antibiotic day.
+
+After sorting the data following the merge, you will see that each patient's antibiotic sequence repeats for each blood culture day. This repetition allows us to look at each blood culture day and check if it is associated with a qualifying sequence of antibiotics.
+
+```{r echo=F, include=F}
+
+# Merge antibioticDT with blood_cultureDT
+combinedDT <- merge(antibioticDT, blood_cultureDT, by = "patient_id", all = F)
+
+# Sort by patient_id, blood_culture_day, day_given, and antibiotic_type
+setorder(combinedDT, patient_id, blood_culture_day, day_given, antibiotic_type)
+
+# Print and examine the first 30 rows
+head(combinedDT, 30)
+
+```
+
+
+## Determine whether each row is in-window
+Now that we have the antibiotic and blood culture data combined, we can test each drug administration against each blood culture to see if it's "in the window."
+
+```{r in window, echo=F}
+
+# Make a new variable called drug_in_bcx_window
+combinedDT[, 
+           drug_in_bcx_window := as.numeric( (blood_culture_day-day_given) 
+                                            %in% c(-2, -1, 0, 1, 2))]
+
+```
+
+## Check the I.V. requirement
+Now let's look at the fourth item in the criteria.
+
+**Criteria for Suspected Infection**
+
+1. The patient receives antibiotics for a sequence of four days, with gaps of one day allowed.
+2. The sequence must start with a new antibiotic, defined as an antibiotic type that was not given in the previous two days.
+3. The sequence must start within two days of a blood culture.
+4. There must be at least one intervenous (I.V.) antibiotic within the +/-2 day window.
+
+
+```{r Any}
+
+# Create a variable indicating if there was at least one I.V. drug given in the window
+combinedDT[, any_iv_in_bcx_window := as.numeric(any(route == "IV" & drug_in_bcx_window == 1)), 
+           by = .(patient_id, blood_culture_day)]
+
+# Exclude rows in which the blood_culture_day does not have any I.V. drugs in window 
+combinedDT <- combinedDT[any_iv_in_bcx_window == 1]
+
+```
+
+## Find the first day of possible sequences
+We're getting close! Let's review the criteria again.
+
+**Criteria for Suspected Infection**
+
+1. The patient receives antibiotics for a sequence of four days, with gaps of one day allowed.
+
+2. The sequence must start with a new antibiotic, defined as an antibiotic type that was not given in the previous two days.
+
+3. The sequence must start within two days of a blood culture.
+
+4. There must be at least one intervenous (I.V.) antibiotic within the +/-2 day window.
+
+Let's assess the first criterion by finding the first day of possible 4-day qualifying sequences.
+
+
+```{r echo=F}
+
+# Create a new variable called day_of_first_new_abx_in_window
+combinedDT[, day_of_first_new_abx_in_window := 
+           day_given[antibiotic_new == 1 & drug_in_bcx_window  == 1][1], by = .(patient_id, blood_culture_day)]
+
+# Remove rows where the day is before this first qualifying day
+combinedDT <- combinedDT[day_given >= day_of_first_new_abx_in_window]
+
+```
+
+## Simplify the data
+The first criterion is: The patient receives antibiotics for a sequence of four days, with gaps of one day allowed.
+
+We've pinned down the first day of possible sequences in the previous task. Now we have to check for four-day sequences. We don't need the drug type (name); we need the days the antibiotics were administered.
+
+```{r duplicate, echo = F}
+
+# Create a new data.table containing only patient_id, blood_culture_day, and day_given
+simplified_data <- combinedDT[, .(patient_id, blood_culture_day, day_given)]
+
+# Remove duplicate rows
+simplified_data <- unique(simplified_data)
+
+```
+
+## Extract first four rows for each blood culture
+To check for four-day sequences, let's pull out the first four days (rows) for each patient/blood culture combination. Some patients will have less than four antibiotic days. We'll remove them first.
+
+```{r SD}
+
+# Count the antibiotic days within each patient/blood culture day combination
+simplified_data[, num_antibiotic_days := .N, by = .(patient_id, blood_culture_day)]
+
+# Remove blood culture days with less than four rows 
+simplified_data <- simplified_data[num_antibiotic_days >= 4]
+
+# Select the first four days for each blood culture
+first_four_days <- simplified_data[,.SD[1:4] , by= .(patient_id, blood_culture_day)]
+head(first_four_days) %>% kable() %>% kable_styling(full_width = F, position = "left")
+```
+
+## Consecutive sequence
+Now we need to check whether each four-day sequence qualifies by having no gaps of more than one day.
+
+
+```{r}
+
+# Make the indicator for consecutive sequence
+first_four_days[, four_in_seq := as.numeric(max(diff(day_given)) < 3), by = .(patient_id, blood_culture_day)]
+
+```
+
+## Select the patients who meet criteria
+A patient would meet the criteria if any of their blood cultures were accompanied by a qualifying sequence of antibiotics. Now that we've determined which each blood culture qualify let's select the patients who meet the criteria.
+
+```{r echo =F}
+
+# Select the rows which have four_in_seq equal to 1
+suspected_infection <- first_four_days[four_in_seq == 1]
+
+# Retain only the patient_id column
+suspected_infection <- suspected_infection[, .(patient_id)]
+
+# Remove duplicates
+suspected_infection <- unique(suspected_infection)
+
+# Make an infection indicator
+suspected_infection[, infection := 1]
+
+```
+
+## Find the prevalence of sepsis
+In this project, we used two EHR datasets to flag patients who were suspected of having a serious infection.
+
+So far, we've been looking at records of all antibiotics administered and blood cultures that occurred over two weeks at a particular hospital. However, not all patients who were hospitalized over this period are represented in combinedDT because not all of them took antibiotics or had blood culture tests. We have to read in and merge the rest of the patient information to see what percentage of patients at the hospital might have had a serious infection.
+
+```{r echo =F, include = F}
+
+# Read in "all_patients.csv"
+all_patientsDT <- fread("data/all_patients.csv")
+
+# Merge this with the infection flag data
+all_patientsDT <- merge(suspected_infection, all_patientsDT, by = "patient_id", all = T)
+
+# Set any missing values of the infection flag to 0
+all_patientsDT[is.na(infection), infection := 0]
+
+# Calculate the percentage of patients who met the criteria for presumed infection
+ans  <- mean(all_patientsDT$infection) * 100
+ans
+
+
+```
+
