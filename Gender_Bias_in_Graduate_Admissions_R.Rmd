@@ -1,0 +1,242 @@
+---
+title: "Gender Bias in Graduate Admissions"
+author: "Bilsay Varcin"
+date: "5/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Description
+If you were a man applying to Berkeley's graduate school in 1973, you were almost twice as likely to be admitted as your female peers. On the surface, this seems to have been a flagrant case of gender discrimination. However, a closer inspection of the data reveals that women were more likely to apply to departments where the admission rate was lower overall, which was the true reason for any difference between the sexes.
+
+The Berkeley problem is a classic example of **Simpson's paradox** – an important concept in statistics where an effect disappears or even reverses when you control for other factors. Knowledge of this concept can prove critical in areas such as education policy, human resources, or any other field where bias or discrimination is a concern.
+
+## Welcome to Berkeley
+It's 1973, and – as one of the top-ranked universities in the United States – Berkeley has attracted thousands of applicants to its graduate school. But how many made the cut?
+
+We will start off by loading the UCBAdmissions dataset, which is included in base R. This shows the number of students – male and female – who were admitted or rejected from the six largest departments at Berkeley. Since the dataset takes the unwieldly form of a three-dimensional array, we will convert it to tidy format using the tidy function from the tidytext package. Then we will be ready to start doing some analysis.
+
+```{r echo=F, out.width='100%', fig.align='left', fig.cap=paste("*Source:* [brainchildvn](https://www.flickr.com/photos/brainchildvn/) *on Flickr*")}
+knitr::include_graphics("statics/Berkeley.jpg")
+
+```
+
+```{r echo=F}
+# Load UCBAdmissions dataset
+data(UCBAdmissions)
+
+# Print dataset to console
+# print(UCBAdmissions)
+
+# Load broom package
+library(broom)
+library(kableExtra)
+
+# Convert UCBAdmissions to tidy format
+ucb_tidy <- tidy(UCBAdmissions)
+
+# Print tidy dataset to console
+ucb_tidy %>% kable() %>% kable_styling(full_width = F, position = "left") %>% scroll_box(height = "200px", width = "500px")
+
+```
+
+
+## Acceptance rate for men and women
+The data is more readable now that it is in tidy format, but – since it is split by department and displays raw counts – it is difficult for us to infer any kind of gender bias. To do that, we need to aggregate over department and ask ourselves, overall, what proportion of men and women were accepted into Berkeley in 1973.
+
+Here we make use of the dplyr package for all of our data manipulation tasks. We aggregate over department using the group_by function to get the total number of men and women who were accepted into or rejected from Berkeley that year, as well as the proportion accepted in each case. That will leave us in a better place to understand any accusations of gender bias.
+
+```{r echo=F, message=F}
+
+# Load the dplyr library
+library(dplyr)
+
+# Aggregate over department
+ucb_tidy_aggregated <- ucb_tidy %>% 
+  group_by(Admit, Gender) %>% 
+  summarize(n = sum(n)) %>% 
+  ungroup() %>% 
+  group_by(Gender) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  filter(Admit == "Admitted")
+
+# Print aggregated dataset
+ucb_tidy_aggregated %>% kable() %>% kable_styling(full_width = F, position = "left")
+
+```
+
+
+## Visualizing the discrepancy
+From the previous task, we can see that **44.5% of male applicants** were accepted into Berkeley, as opposed to **30.4% of female applicants.** Now we can start to see the problem. Did Berkeley's graduate admissions department really discriminate against women that year?
+
+Before we consider alternative explanations, let's visualize the discrepancy through a simple bar chart using ggplot2. This won't add much to our understanding of the problem right now, but it will act as a useful reference point later on.
+
+For clarity, we will format acceptance rate as a percentage using the percent function from the scales package.
+
+
+```{r message=F}
+
+# Load the ggplot2 and scales packages
+library(ggplot2)
+library(scales)
+
+# Prepare the bar plot
+gg_bar <- ucb_tidy_aggregated %>% 
+    ggplot(aes(x = Gender, y = prop, fill = Gender)) +
+    geom_col() +
+    geom_text(aes(label = percent(prop)), vjust = -1) +
+    labs(title = "Acceptance rate of male and female applicants",
+         subtitle = "University of California, Berkeley (1973)",
+         y = "Acceptance rate") +
+    scale_y_continuous(labels = scales::percent, limits = c(0, 0.5)) +
+    guides(fill = FALSE)
+
+# Print the bar plot
+print(gg_bar)
+
+```
+
+
+## Acceptance rate by department
+The bar plot confirms what we already knew – a higher proportion of men were accepted than women. But what happens when we separate the graph out by department?
+
+Now we can return to our ucb_tidy dataset. After calculating the proportion of acceptances/rejections, we will plot a separate chart for each department using the facet_wrap() function in ggplot2. This will give us an idea of how acceptance rates differ by department, as well as by gender.
+
+
+```{r echo=F}
+
+# Calculate acceptance/rejection rate
+ucb_by_dept <- ucb_tidy %>% 
+    group_by(Gender, Dept) %>% 
+    mutate(prop = n / sum(n)) %>% 
+    filter(Admit == "Admitted")
+
+# Print the dataset
+ucb_by_dept %>% kable() %>% kable_styling(full_width = F, position = "left") %>% scroll_box(height = "200px", width = "500px")
+
+# Prepare the bar plot for each department
+gg_bar_faceted <- ucb_by_dept %>% 
+  ggplot(aes(Gender, prop, fill = Gender)) +
+  geom_col() +
+  geom_text(aes(label = percent(prop)), vjust = -1) +
+  labs(title = "Acceptance rate of male and female applicants",
+       subtitle = "University of California, Berkeley (1973)",
+       y = "Acceptance rate") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  facet_wrap(~Dept) +
+  guides(fill = F)
+
+# Print the bar plot for each department
+print(gg_bar_faceted)
+
+```
+
+
+## Alternative explanations
+Now that we have separated out our analysis by department, the interpretation has changed rather dramatically. Although men were indeed more likely to be admitted into Departments C and E, women were more likely to be admitted into all other departments. So what's really going on here?
+
+If you turn your attention to the first two plots, you can see that Department A and B were quite easy to get into. However, relatively few women applied to these departments – only 108 women applied to Department A, as opposed to 825 men!
+
+At this stage, we can hypothesise that the effect of gender on acceptance is null when you control for department. We can test that hypothesis using binary logistic regression, but first we need to de-aggregate the dataset so that each row represents one student. That should leave us with 4,526 rows – one row for each student who applied to Berkeley that year.
+
+
+```{r}
+
+# Define function that repeats each row in each column n times
+multiply_rows <- function(column, n) {
+  rep(column, n)
+}
+
+# Create new de-aggregated data frame using the multiply_rows function
+ucb_full <- data.frame(Admit = multiply_rows(ucb_tidy$Admit, ucb_tidy$n),
+                      Gender = multiply_rows(ucb_tidy$Gender, ucb_tidy$n),
+                      Dept = multiply_rows(ucb_tidy$Dept, ucb_tidy$n))
+
+# Check the number of rows equals the number of students
+nrow(ucb_full)
+
+```
+
+
+## Binary logistic regression: part i
+The data is now in the right format for us to do some hypothesis testing. Great! But first let's try to predict admittance using gender alone. We will use the built-in glm() function to fit a generalised linear model, making sure to set family = "binomial" because the outcome variable is binary (Admitted or Rejected).
+
+By default, Admit is coded such that Admitted is level 1 and Rejected is level 2 (because of their alphabetical order). Since glm() will assume that level 2 represents 'success', we will reverse the coding of Admit so we are predicting the probability of admittance rather than rejection.
+
+To change the coding of a variable, you can use the fct_relevel() function from the forcats package.
+
+```{r}
+
+# Load the forcats library
+library(forcats)
+
+# Reverse the coding of the Admit variable
+ucb_full$Admit <- fct_relevel(ucb_full$Admit, "Rejected", "Admitted")
+
+# Run the regression
+glm_gender <- glm(Admit ~ Gender, data = ucb_full, family = "binomial")
+
+# Summarize the results
+summary(glm_gender)
+
+```
+
+
+## Binary logistic regression: part ii
+Sure enough, when you predict the probability of admission as a function of gender alone, the effect is statistically significant (p < 0.01). **Specifically, you are exp(0.61035) = 1.84 times** more likely to be admitted if you are a man. However, what happens if we control for department?
+
+
+```{r}
+
+# Run the regression, including Dept as an explanatory variable
+glm_genderdept <- glm(Admit ~ Gender + Dept, data = ucb_full, family = "binomial")
+
+# Summarize the results
+summary(glm_genderdept)
+
+```
+
+
+Finally, we can see Simpson's paradox at play – when you control for the effect of department on the probability of admission, the effect of gender disappears. In fact, it even reverses, suggesting that – controlling for department – you were actually more likely to be admitted as a woman! However, this effect is not statistically significant (p > 0.05), so we conclude that there was not a campus-wide bias against applicants of either gender in 1973.
+
+That said, individual departments often handle their own admissions processes, so it is plausible that bias exists in one department but not another. Let's take a look at Department A, where 82.4% of women were admitted but only 62.1% of men. Is the difference statistically significant?
+
+
+```{r}
+
+# Filter for Department A
+dept_a <- ucb_full %>% filter(Dept == "A")
+
+# Run the regression
+glm_gender_depta <- glm(Admit ~ Gender, data = dept_a, family = "binomial")
+
+# Summarize the results
+summary(glm_gender_depta)
+
+```
+
+
+## Bias or discrimination?
+Well then! If we take Department A in isolation, we find there is a statistically significant bias in favour of women. So does that mean that the department discriminated against men?
+
+Not necessarily. After all, the bias might exist simply because the female applicants to Department A were better qualified that year. In their article dealing with this issue, Bickel, Hammel & O'Connell (1975) define discrimination as "the exercise of decision influenced by the sex of the applicant when that is immaterial to the qualifications for entry". Since we do not have any data on the respective qualifications of the candidates, we cannot say whether any gender bias in their admissions process amounted to discrimination.
+
+Although now more than 40 years old, the Berkeley problem is a useful reminder about the dangers of aggregation and omitted variable bias, especially in relation to matters of such legal and ethical importance as discrimination. Where bias does exist – as it does in the case of Department A – it is always worth considering whether there are any other factors that could explain the discrepancy.
+
+
+```{r echo=F, include=F}
+
+# Define bias
+bias <- "a pattern of association between a particular decision and a particular sex of applicant, of sufficient strength to make us confident that it is unlikely to be the result of chance alone"
+
+# Define discrimination
+discrimination <- "the exercise of decision influenced by the sex of the applicant when that is immaterial to the qualifications for entry"
+
+# Is bias equal to discrimination?
+bias == discrimination
+
+```
+
