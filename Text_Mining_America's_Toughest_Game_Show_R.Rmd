@@ -1,0 +1,174 @@
+---
+title: "Text Mining America's Toughest Game Show"
+author: "Bilsay Varcin"
+date: "6/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## This... is... Jeopardy!
+
+
+"This... is... Jeopardy!" These words will ring a bell for anyone who has watched the American game show, Jeopardy! . This iconic TV show could be described as quizbowl with gambling. In each 30-minute episode, three contestants compete in answering questions with specific monetary value, accumulating and wagering their earnings throughout each round. It's no petty cash, either; a recent Jeopardy! champion, James Holzhauer, walked away with $2.46 million after winning in 33 consecutive episodes.
+
+However, for an aspiring Jeopardy! champion, the amount of knowledge required to excel at the game might seem discouraging at first glance. How can it be possible to know everything about everything? Some Jeopardy! enthusiasts have turned to data analysis for the answers—and we'll do just that. In this project, we'll use basic text mining techniques on Jeopardy! data to spot trends in the types of questions asked. Let's start by loading in the dataset and the packages we'll need.
+
+
+```{r Load Data, echo=F, message=F, include=F}
+
+library(readr)
+library(dplyr)
+library(tm)
+library(wordcloud)
+
+jeopardy <- read_csv("data/jeopardy.csv")
+
+```
+
+## A glimpse ahead
+
+
+Here are the basic rules of the game. Three contestants compete against each other in three rounds: Jeopardy, Double Jeopardy, and Final Jeopardy. In Jeopardy and Double Jeopardy , each round has six categories, with five answers per category. After an answer is read by the show's host, Alex Trebeck, each contestant competes to be the first to come up with the correct question to the answer.
+
+Each answer has a monetary value based on its difficulty. The monetary values in the Double Jeopardy round are double the values of the answers in Jeopardy round. In Final Jeopardy, the contestants bet any amount from their accumulated earnings on one difficult answer.
+
+For a complete breakdown of the rules, check out the Jeopardy! Wikipedia page. Knowing the rules of the game will make the jeopardy dataset easier to understand!
+
+
+## Corpus of categories
+Whew. Where do we even start? Jeopardy! questions and answers include all kinds of words—places, people, even obscure vocabulary. Did you know that "philately" means "love of stamp collecting?" Check out the data from show number 6108.
+
+It might be better to start with a small-scale text analysis. Let's look at the categories. In addition to having clever and sometimes downright funny names, they'll tell us a little more about the content of the questions without having to analyze the question text.
+
+We need to take the categories data and convert it to an easily-workable body of text—in other words, a corpus.
+
+```{r Corpus, echo=F}
+
+categories <- jeopardy %>%
+    filter(round == "Jeopardy!") %>%
+    select(category)
+
+categories_source <- VectorSource(categories)
+categories_corp <- VCorpus(categories_source)
+
+```
+
+
+## Cleaning the categories
+Jeopardy! categories are notorious for being witty and unique. An example of a category title is "Element, Spel-ement" (from the episode aired on March 28, 2011). Every question in this category gave the contestant a list of chemical element names, and the contestant had to spell the word created by the symbols of those elements (example: boron, aluminum, potassium = "balk").
+
+Some categories have more straightforward titles, such as the "Indonesia" category (from the episode on March 25, 2011), which had questions all about Indonesia.
+
+You can imagine that text mining from these wordy and specific categories might be difficult—and this would probably be correct. Some cleaning is in order! Bust out the vacuums (or in this case, some tm package verbs).
+
+
+```{r TM, echo=F}
+
+clean_corp <- tm_map(categories_corp, content_transformer(tolower))
+clean_corp <- tm_map(clean_corp, removePunctuation)
+clean_corp <- tm_map(clean_corp, stripWhitespace)
+clean_corp <- tm_map(clean_corp, removeWords, stopwords("en"))
+
+# Create a TDM from the clean corpus
+categories_tdm <- TermDocumentMatrix(clean_corp)
+
+```
+
+## Favorite topics
+A basic, yet fairly effective analysis here would be a word-frequency analysis. If certain words popped on in category titles more often than others, we could reasonably assume that there are recurring themes in Jeopardy! categories.
+
+First, we will need to turn the TDM into an M (a matrix). Then, we will rank the most frequent words.
+
+
+```{r bar, echo=F}
+
+categories_m <- as.matrix(categories_tdm)
+term_frequency <- sort(rowSums(categories_m),decreasing = T)
+barplot(term_frequency[1:12], las = 2)
+
+
+```
+
+## Removing unwanted words
+That is a nice barplot...but we're in this for the money and Jeopardy! fame. Let's improve the bar plot by removing some unhelpful words: "time," "new," "first," and "lets."
+
+
+```{r bar2, echo=F}
+
+cleaner_corp <- tm_map(clean_corp, removeWords, c("time", "new", "first", "lets"))
+
+cleaner_tdm <- TermDocumentMatrix(cleaner_corp)
+
+categories_m <- as.matrix(cleaner_tdm)
+term_frequency <- sort(rowSums(categories_m),decreasing = T)
+barplot(term_frequency[1:12], las = 2)
+
+
+```
+
+
+## Creating better tools, part 1
+A few of our top ranking category words are: "words," "world," "state," "name," and "history."
+
+"Words" most likely refers to the wordplay or vocabulary categories, which appear often on the show. The other four words suggest that a Jeopardy! champion will need to know a lot about history, geography, and significant historical figures. However, when we go further down the plot, there's an interesting term—the 11th most common term is "American." Considering this is an American game show, it would make sense that the game requires the contestants to be most familiar with American history. We should look into this!
+
+But first, let's save some time by condensing many lines of code into one. We'll write simple, one-line functions for the cleaning and term-frequency extraction processes.
+
+```{r func, echo=F}
+
+speed_clean <- function(x) {
+    clean_corp <- tm_map(x, content_transformer(tolower))
+clean_corp <- tm_map(clean_corp, removePunctuation)
+clean_corp <- tm_map(clean_corp, stripWhitespace)
+clean_corp <- tm_map(clean_corp, removeWords, stopwords("en"))
+}
+
+```
+
+
+## Creating better tools, part 2
+We can incorporate the speed_clean() function we just made into a new function that will extract frequent terms from an already-cleaned matrix. Then, we'll move on to Final Jeopardy, the last and toughest round (also, the one with the iconic Jeopardy! song).
+
+
+```{r func2, echo=F}
+
+freq_terms <- function(list) {
+  source <- VectorSource(list)
+  corpus <- VCorpus(source)
+  clean_corpus <- speed_clean(corpus)
+  tdm <- TermDocumentMatrix(clean_corpus)
+  matrix <- as.matrix(tdm)
+  term_frequency <- sort(rowSums(matrix), decreasing = TRUE)
+  return(term_frequency)
+}
+
+```
+
+
+## Think!
+Final Jeopardy is arguably the most important round in the entire game—contestants bet any amount from their accumulated earnings on one answer. This answer is supposedly more difficult than all the questions in the previous rounds. The contestants make their bets before the answer is read and are given 30 seconds to write down their questions. You can probably imagine how much of a game-changer this round is (check out this for proof).
+
+Since we've already looked at the categories, let's look at some of the correct answers to Final Jeopardy questions.
+
+
+```{r wordcloud, echo=F}
+
+answers <- jeopardy %>%
+    filter(round == "Final Jeopardy!") %>%
+    select(answer)
+
+ans_frequency <- freq_terms(answers)
+ans_names <- names(ans_frequency)
+
+wordcloud(ans_names, freq = ans_frequency,  max.words = 40, colors = c("wheat", "plum", "salmon"))
+
+```
+
+
+## A few insights
+John, William, James, and Henry... who might these people be? We don't know exactly, but the wordcloud seems to support and expand upon a hunch we had a little while ago - many Jeopardy! questions are drawn from American or European history. While it is certainly possible to get a category like "Indonesia," contestants are much more likely to be tested on the history, literature, or pop culture from the west. This might not be surprising, but there are plenty of other insights to be drawn from the dataset using the text mining techniques we have explored in this project.
+
