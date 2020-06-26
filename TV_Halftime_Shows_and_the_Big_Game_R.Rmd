@@ -1,0 +1,228 @@
+---
+title: "TV, Halftime Shows, and the Big Game"
+author: "Bilsay Varcin"
+date: "6/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+## TV, halftime shows, and the Big Game
+Whether or not you like American football, the Super Bowl is a spectacle. There is always a little something for everyone. For the die-hard fans, there is the game itself with blowouts, comebacks, and controversy. For the not so die-hard fans, there are the ridiculously expensive ads that are hilarious, gut-wrenching, thought-provoking, and sometimes weird. And of course, there are the halftime shows with the biggest musicians in the world entertaining us by riding a giant mechanical tiger or leaping from the roof of the stadium. It is a grand show! In this notebook, we're going to explore how some of these elements interact with each other. After exploring and cleaning the data, we're going to answer questions like:
+
+* What are the most extreme game outcomes?
+
+* How does the score difference affect television viewership?
+
+* How have viewership, TV ratings, and advertisement costs evolved?
+
+* Who are the most prolific musicians in terms of halftime show performances?
+
+The dataset we'll use was scraped and polished from Wikipedia. It is made up of three CSV files, one with [game data](https://en.wikipedia.org/wiki/List_of_Super_Bowl_champions), one with [TV data](https://en.wikipedia.org/wiki/Super_Bowl_television_ratings), and one with [halftime musician data](https://en.wikipedia.org/wiki/List_of_Super_Bowl_halftime_shows) for all 52 Super Bowls through 2018.
+
+```{r include=F}
+
+# Load packages
+library(tidyverse)
+
+# Load the CSV data
+super_bowls  <-  read_csv("data/super_bowls.csv")
+tv  <-  read_csv("data/tv.csv")
+halftime_musicians  <-  read_csv("data/halftime_musicians.csv")
+
+# Display the first six rows of each tibble
+head(super_bowls)
+head(tv)
+head(halftime_musicians)
+
+```
+
+
+## Taking note of dataset issues
+From the quick look at the Super Bowl game data, we can see that the dataset appears whole except for missing values in the backup quarterback columns (qb_winner_2 and qb_loser_2), which make sense given most starting QBs in the Super Bowl (qb_winner_1 and qb_loser_1) play the entire game.
+
+From the visual inspection of TV and halftime musicians data, there is only one missing value displayed, but I've got a hunch there are more. The first Super Bowl was played on January 15, 1967, and I'm guessing some data (e.g., the number of songs performed) probably weren't tracked reliably over time. Wikipedia is great but not perfect.
+
+Looking at a summary of the datasets shows us that there are multiple columns with null values.
+
+
+```{r}
+
+# Summary of the TV data
+summary(tv)
+
+# Summary of the halftime musician data 
+summary(halftime_musicians)
+
+```
+
+## Combined points distribution
+In the TV data, the following columns have a lot of missing values:
+
+* total_us_viewers (amount of U.S. viewers who watched at least some part of the broadcast)
+rating_18_49 (average % of U.S. adults 18-49 who live in a household with a TV that were watching for the entire broadcast)
+
+* share_18_49 (average % of U.S. adults 18-49 who live in a household with a TV in use that were watching for the entire broadcast)
+
+* In halftime musician data, there are missing numbers of songs performed (num_songs) for about a third of the musicians.
+
+There are a lot of potential reasons for missing values. Were the data ever tracked? Would the research effort to fill in the gaps be worth it? Maybe. Watching every Super Bowl halftime show to get song counts could be pretty fun. But we don't have time to do that now! Let's take note of where the datasets are not perfect and start uncovering some insights.
+
+We'll start by visualizing the distribution of combined points for each Super Bowl. Let's also find the Super Bowls with the highest and lowest scores.
+
+```{r}
+
+# Reduce the size of the plots
+options(repr.plot.width = 5, repr.plot.height = 4)
+
+# Plot a histogram of combined points
+ggplot(super_bowls, aes(combined_pts)) +
+ geom_histogram(binwidth = 5) +
+ labs(x = "Combined Points", y = "Number of Super Bowls")
+
+# Display the highest- and lowest-scoring Super Bowls
+super_bowls  %>% 
+ filter(combined_pts > 70 | 25 < combined_pts)
+
+```
+
+
+## Point difference distribution
+Most of the combined scores are between 40 and 50 points, with the extremes being roughly equal distance away in opposite directions. At the highest combined scores of 74 and 75, are two games featuring dominant quarterback performances. One happened last year - Super Bowl LII when Tom Brady's Patriots lost to Nick Foles' underdog Eagles 33 to 41, for a combined score of 74.
+
+On the other end of the spectrum, we have Super Bowl III and VII, which featured tough defenses that dominated the games. We also have Super Bowl IX in New Orleans in 1975, whose 16-6 score can be attributed to inclement weather. Overnight rain made the field slick, and it was cold (46 °F / 8 °C), making it hard for the Steelers and Vikings to do much offensively. This was the second-coldest Super Bowl ever and the last to be played in inclement weather for over 30 years. The NFL realized people like points, I guess.
+
+UPDATE: In Super Bowl LIII in 2019, the Patriots and Rams broke the record for the lowest-scoring Super Bowl with a combined score of 16 points (13-3 for the Patriots).
+
+Now let's take a look at the point difference between teams in each Super Bowl.
+
+
+
+```{r}
+# Reduce the size of the plots
+options(repr.plot.width = 5, repr.plot.height = 4)
+
+# Plot a histogram of point differences
+ggplot(super_bowls, aes(difference_pts)) +
+ geom_histogram(binwidth = 2) +
+ labs(x = "Point Difference", y = "Number of Super Bowls")
+
+# Display the closest game and largest blow out
+super_bowls  %>% 
+ filter(difference_pts == min(difference_pts) | difference_pts == max(difference_pts))
+
+```
+
+
+## Do blowouts translate to lost viewers?
+The vast majority of Super Bowls are close games. Makes sense. Both teams are the best in their conference if they've made it this far. The closest game ever was the Buffalo Bills' 1-point loss to the New York Giants in 1991, which is best remembered for Scott Norwood's last-second missed field goal attempt that went wide right, kicking off four Bills Super Bowl losses in a row. Poor Scott. The biggest point spread so far is 45 points (!) when Hall of Famer, Joe Montana, led the San Francisco 49ers to victory in 1990, one year before the closest game ever.
+
+I remember watching the Seahawks crush the Broncos by 35 points (43-8) in 2014, which was a boring experience in my opinion. The game was never really close. I'm pretty sure we changed the channel at the end of the third quarter. Let's combine the game data and TV data to see if this is a universal phenomenon. Do large point differences translate to lost viewers? We can plot household share (average percentage of U.S. households with a TV in use that were watching for the entire broadcast) vs. point difference to find out.
+
+```{r}
+# Filter out Super Bowl I and join the game data and TV data
+games_tv <- tv  %>% 
+ filter(super_bowl != 1)  %>% 
+ inner_join(super_bowls, by = "super_bowl")
+
+# Create a scatter plot with a linear regression model
+ggplot(games_tv, aes(x = difference_pts, y = share_household)) +
+ geom_point() +
+ geom_smooth(method = "lm") +
+ labs(x = "Point Difference", y = "Viewership (household share)")
+
+```
+
+## Viewership and the ad industry over time
+The downward sloping regression line and the 95% confidence interval for that regression suggest that bailing on the game if it is a blowout is common. Though it matches our intuition, we must take it with a grain of salt because the linear relationship in the data is weak due to our small sample size of 52 games.
+
+Regardless of the score, I bet most people stick it out for the halftime show, which is good news for the TV networks and advertisers. A 30-second spot costs a pretty $5 million now, but has it always been that much? And how has the number of viewers and household ratings trended alongside advertisement cost? We can find out using line plots that share a "Super Bowl" x-axis.
+
+```{r}
+# Convert the data format for plotting
+games_tv_plot  <- games_tv %>% 
+    gather(key = "category", value = "value", avg_us_viewers, rating_household, ad_cost)  %>% 
+    mutate(cat_name = case_when(category == "avg_us_viewers" ~ "Average number of US viewers",
+                                category == "rating_household" ~ "Household rating",
+                                category == "ad_cost" ~ "Advertisement cost (USD)",
+                                TRUE ~ as.character(category)))
+
+# Plot the data
+ggplot(games_tv_plot, aes(x = super_bowl, y = value)) +
+ geom_line() +
+ facet_wrap(~ cat_name, scales = "free", nrow = 3) + 
+ labs(x = "Super Bowl", y = "") +
+ theme_minimal()
+```
+
+## Halftime shows weren't always this great
+We can see that the number of viewers increased before advertisement costs did. Maybe the networks weren't very data savvy and were slow to react? Makes sense since DataCamp didn't exist back then.
+
+Another hypothesis: maybe halftime shows weren't as entertaining in the earlier years? The modern spectacle that is the Super Bowl has a lot to do with of big halftime acts. I went down a YouTube rabbit hole, and it turns out that older halftime shows were not quite the spectacle they are today. Some examples:
+
+* Super Bowl XXVI in 1992: A Frosty The Snowman rap performed by children.
+
+* Super Bowl XXIII in 1989: An Elvis impersonator who did magic tricks and didn't even sing one Elvis song.
+
+* Super Bowl XXI in 1987: Tap dancing ponies. Okay, that was pretty awesome actually.
+
+It turns out that Michael Jackson's Super Bowl XXVII performance, one of the most watched events in American TV history, was when the NFL realized that the having big-name halftime acts brought in more viewers. Let's look at the halftime acts before Michael Jackson brought the NFL and entertainment industry together.
+
+```{r}
+# Filter and diplay halftime musicians before and including Super Bowl XXVII
+( pre_MJ  <- halftime_musicians  %>% 
+ filter(super_bowl <= 27) )
+```
+
+## Who has the most halftime show appearances?
+Now that's a lot of marching bands! There was also the American jazz clarinetist, Pete Fountain, and Miss Texas 1973 played the violin. Nothing against those performers - they are just simply not Beyoncé. To be fair, no one is.
+
+Let's find all the musicians who performed at the Super Bowl more than once and count their performances.
+
+```{r}
+
+# Display the musicians who performed more than once
+halftime_musicians  %>% 
+    count(musician, sort = T)  %>% 
+    filter(n > 1) 
+    
+```
+
+## Who performed the most songs in a halftime show?
+The world-famous Grambling State University Tiger Marching Band takes the crown with six appearances. Beyoncé, Justin Timberlake, Nelly, and Bruno Mars are the only post-Y2K musicians with multiple appearances (two each).
+
+Now let's look at the number of songs performed in a halftime show. From our previous inspections, the num_songs column has a lot of missing values:
+
+A lot of the marching bands don't have num_songs entries.
+For non-marching bands, there is a lot of missing data before Super Bowl XX.
+Let's filter out marching bands by using a string match for "Marching" and "Spirit" (a common naming convention for marching bands is "Spirit of [something]"). We'll only keep data from Super Bowls XX and later to address the missing data issue, and then let's see who performed the most number of songs.
+
+```{r}
+# Remove marching bands and data before Super Bowl XX
+musicians_songs  <- halftime_musicians  %>% 
+    filter(!str_detect(musician, "Marching"),
+           !str_detect(musician, "Spirit"),
+          super_bowl > 20)
+
+# Plot a histogram of the number of songs per performance
+ggplot(musicians_songs, aes(num_songs)) + 
+    geom_histogram(binwidth = 1) +
+    labs(x = "Number of songs per halftime show", y = "Number of musicians")
+
+# Display the musicians with more than four songs per show
+musicians_songs  %>% 
+    filter(num_songs >= 4)  %>% 
+    arrange(desc(num_songs))
+```
+
+
+
+## Conclusion
+Most non-band musicians do 1 to 3 songs per halftime show. It's important to note that the duration of the halftime show is fixed (roughly 12 minutes) so songs per performance is more a measure of how many hit songs you have (cram as many hit songs in as you can!). Timberlake went off in 2018 with 11 songs! Wow! Diana Ross comes in second with a ten song medley in 1996.
+
+In this notebook, we loaded, cleaned, and explored Super Bowl game, television, and halftime show data. We visualized the distributions of combined points, point differences, and halftime show performances using histograms. We used line plots to see how advertisement cost increases lagged behind viewership increases. And, we discovered that blowouts appear to lead to a drop in viewership.
+
+This year's Big Game will be here before you know it. Who do you think will win Super Bowl LIII?
+
