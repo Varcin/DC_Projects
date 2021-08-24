@@ -1,0 +1,67 @@
+---
+title: "Wrangling and Visualizing Musical Data"
+author: "Bilsay Varcin"
+date: "7/7/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+## Introduction
+How do musicians choose the chords they use in their songs? Do guitarists, pianists, and singers gravitate towards different kinds of harmony?
+
+We can uncover trends in the kinds of chord progressions used by popular artists by analyzing the harmonic data provided in the [McGill Billboard Dataset](https://ddmal.music.mcgill.ca/research/The_McGill_Billboard_Project_(Chord_Analysis_Dataset)/). This dataset includes professionally tagged chords for several hundred pop/rock songs representative of singles that made the Billboard Hot 100 list between 1958 and 1991. Using the data-wrangling tools available in the dplyr package, and the visualization tools available in the ggplot2 package, we can explore the most common chords and chord progressions in these songs, and contrast the harmonies of some guitar-led and piano-led artists to see where the "affordances" of those instruments may affect the chord choices artists make.
+
+```{r}
+# Loading individual Tidyverse packages
+library(dplyr)
+library(readr)
+library(ggplot2)
+
+# Reading in the McGill Billboard chord data
+bb <- read_csv("data/bb_chords.csv")
+
+# Taking a look at the first rows in bb
+bb[1,]
+```
+
+
+## The most common chords
+As seen in the previous task, this is a tidy dataset: each row represents a single observation, and each column a particular variable or attribute of that observation. Note that the metadata for each song (title, artist, year) is repeated for each chord -- like "I Don't Mind" by James Brown, 1961 -- while the unique attributes of each chord (chord symbol, chord quality, and analytical designations like integer and Roman-numeral notation) is included once for each chord change.
+
+A key element of the style of any popular musical artist is the kind of chords they use in their songs. But not all chords are created equal! In addition to differences in how they sound, some chords are simply easier to play than others. On top of that, some chords are easier to play on one instrument than they are on another. And while master musicians can play a wide variety of chords and progressions with ease, it's not a stretch to think that even the best musicians may choose more "idiomatic" chords and progressions for their instrument.
+
+To start to explore that, let's look at the most common chords in the McGill Billboard Dataset.
+
+```{r}
+
+# Counting the most common chords
+bb_count <- bb %>% 
+    count(chord)
+
+# Displaying the top 20 chords
+head(bb_count, 20)
+
+```
+
+
+## Visualizing the most common chords
+Of course, it's easier to get a feel for just how common some of these chords are if we graph them and show the percentage of the total chord count represented by each chord. Musicians may notice right away that the most common chords in this corpus are chords that are easy to play on both the guitar and the piano: C, G, A, and D major — and to an extent, F and E major. (They also belong to keys, or scales, that are easy to play on most instruments, so they fit well with melodies and solos, as well.) After that, there is a steep drop off in the frequency with which individual chords appear.
+
+To illustrate this, here is a short video demonstrating the relative ease (and difficulty) of some of the most common (and not-so-common) chords in the McGill Billboard dataset.
+
+```{r}
+# Creating a bar plot from bb_count
+bb_count %>%
+  slice(1:20) %>%
+  mutate(share = n/sum(n),
+         chord = reorder(chord, share)) %>%
+  ggplot() +
+  geom_col(aes(x = chord, y = share, fill = chord)) +
+  coord_flip() +
+  xlab("Chord") +
+  ylab("Share of total chords") 
+```
+
